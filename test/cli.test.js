@@ -8,6 +8,7 @@ import {
   analyzeCodexMcp,
   analyzeClaudeMcpSources,
   auditSurfaces,
+  compileInstructions,
   convert,
   detect,
   detectGlobal,
@@ -432,6 +433,22 @@ test("rejects unknown options", () => {
   );
 });
 
+test("rejects compile flags outside project cc->codex compile mode", () => {
+  const cli = (args) => execFileSync(process.execPath, ["src/cli.js", ...args], { cwd: path.resolve("."), stdio: "pipe" });
+  assert.throws(
+    () => cli(["status", "--include-local"]),
+    /--include-local requires --compile/
+  );
+  assert.throws(
+    () => cli(["convert", "codex", "cc", "--compile", "--dry-run"]),
+    /--compile is only supported/
+  );
+  assert.throws(
+    () => cli(["convert", "cc", "codex", "--global", "--compile", "--dry-run"]),
+    /--compile is only supported/
+  );
+});
+
 test("labels existing copy-dir plans as merge", () => {
   const dir = fixture();
   const from = path.join(dir, ".claude", "skills");
@@ -745,6 +762,33 @@ test("audit gaps appear in the migration report", () => {
   assert.match(report, /\.claude\/agents \(manual\)/);
 });
 
+test("compile report does not flag compiled instruction hierarchy as a gap", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "rules"), { recursive: true });
+  mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
+  writeFileSync(path.join(dir, ".claude", "CLAUDE.md"), "Nested.\n");
+  writeFileSync(path.join(dir, ".claude", "rules", "style.md"), "Style.\n");
+  writeFileSync(path.join(dir, "CLAUDE.local.md"), "Local.\n");
+  writeFileSync(path.join(dir, ".claude", "agents", "review.md"), "Agent.\n");
+
+  const report = planCcToCodex(dir, { compile: true }).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  assert.doesNotMatch(report, /\.claude\/CLAUDE.md \(manual\)/);
+  assert.doesNotMatch(report, /\.claude\/rules \(manual\)/);
+  assert.match(report, /CLAUDE.local.md \(manual\)/);
+  assert.match(report, /\.claude\/agents \(manual\)/);
+});
+
+test("compile includeLocal report does not flag CLAUDE.local.md as a gap", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
+  writeFileSync(path.join(dir, "CLAUDE.local.md"), "Local.\n");
+
+  const report = planCcToCodex(dir, { compile: true, includeLocal: true }).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  assert.doesNotMatch(report, /CLAUDE.local.md \(manual\)/);
+  assert.doesNotMatch(report, /Other Claude surfaces detected/);
+});
+
 test("Claude sse url servers are not auto-converted (only http)", () => {
   const dir = fixture();
   writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
@@ -822,4 +866,98 @@ test("audit follows valid symlink dirs but skips broken ones without crashing", 
   assert.doesNotThrow(() => doctorReport(dir));
   // the valid symlinked directory is counted (Claude loads with --follow)
   assert.ok(surfaces.some((s) => s.surface === ".claude/agents"));
+});
+
+test("compile synthesizes the instruction hierarchy with source labels", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "rules"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
+  writeFileSync(path.join(dir, ".claude", "CLAUDE.md"), "Nested.\n");
+  writeFileSync(path.join(dir, ".claude", "rules", "style.md"), "Style.\n");
+
+  const { content } = compileInstructions(dir, {});
+  assert.match(content, /## From CLAUDE.md/);
+  assert.match(content, /## From \.claude\/CLAUDE.md/);
+  assert.match(content, /## From \.claude\/rules\/style.md/);
+  assert.match(content, /Root\.[\s\S]*Nested\.[\s\S]*Style\./);
+});
+
+test("compile inlines a safe @include with a source marker", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, "docs"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n@docs/extra.md\n");
+  writeFileSync(path.join(dir, "docs", "extra.md"), "Extra.\n");
+
+  const { content, manualReviews } = compileInstructions(dir, {});
+  assert.match(content, /<!-- included from docs\/extra.md via CLAUDE.md -->/);
+  assert.match(content, /Extra\./);
+  assert.equal(manualReviews.length, 0);
+});
+
+test("compile excludes CLAUDE.local.md unless includeLocal", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
+  writeFileSync(path.join(dir, "CLAUDE.local.md"), "PRIVATE.\n");
+  assert.doesNotMatch(compileInstructions(dir, {}).content, /PRIVATE/);
+  assert.match(compileInstructions(dir, { includeLocal: true }).content, /PRIVATE/);
+});
+
+test("compile reports unsafe @include and keeps the original line", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n@/etc/passwd\n@missing.md\n");
+  const { content, manualReviews } = compileInstructions(dir, {});
+  assert.match(content, /@\/etc\/passwd/);
+  assert.match(content, /@missing.md/);
+  assert.match(manualReviews.join("\n"), /absolute or home paths/);
+  assert.match(manualReviews.join("\n"), /file not found/);
+});
+
+test("compile does not inline includes outside the project", () => {
+  const dir = fixture();
+  const outside = fixture();
+  writeFileSync(path.join(outside, "secret.md"), "SECRET.\n");
+  writeFileSync(path.join(dir, "CLAUDE.md"), `@../${path.basename(outside)}/secret.md\n`);
+  const { content, manualReviews } = compileInstructions(dir, {});
+  assert.doesNotMatch(content, /SECRET/);
+  assert.match(manualReviews.join("\n"), /escapes the project directory/);
+});
+
+test("compile ignores @include-looking lines inside fenced code blocks", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "```md\n@docs/extra.md\n```\n");
+  mkdirSync(path.join(dir, "docs"), { recursive: true });
+  writeFileSync(path.join(dir, "docs", "extra.md"), "Extra.\n");
+  const { content, manualReviews } = compileInstructions(dir, {});
+  assert.match(content, /@docs\/extra.md/);
+  assert.doesNotMatch(content, /Extra\./);
+  assert.equal(manualReviews.length, 0);
+});
+
+test("compile detects circular includes", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "@a.md\n");
+  writeFileSync(path.join(dir, "a.md"), "A\n@b.md\n");
+  writeFileSync(path.join(dir, "b.md"), "B\n@a.md\n");
+  const { manualReviews } = compileInstructions(dir, {});
+  assert.match(manualReviews.join("\n"), /circular include/);
+});
+
+test("default convert (no --compile) migrates only root CLAUDE.md", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "rules"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
+  writeFileSync(path.join(dir, ".claude", "rules", "style.md"), "Style.\n");
+  const agents = planCcToCodex(dir).find((c) => c.path?.endsWith("AGENTS.md")).content;
+  assert.match(agents, /Migrated from CLAUDE.md/);
+  assert.doesNotMatch(agents, /Style\./);
+});
+
+test("compile convert mode writes the synthesized AGENTS.md", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "rules"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
+  writeFileSync(path.join(dir, ".claude", "rules", "style.md"), "Style.\n");
+  const agents = planCcToCodex(dir, { compile: true }).find((c) => c.path?.endsWith("AGENTS.md")).content;
+  assert.match(agents, /Compiled from Claude Code/);
+  assert.match(agents, /## From \.claude\/rules\/style.md/);
 });

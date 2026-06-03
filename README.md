@@ -160,6 +160,20 @@ MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wi
 
 > ai-switch migrates **durable agent instructions and MCP wiring** — not raw chat history, private sessions, or secret values.
 
+## Compiling the instruction hierarchy (`--compile`)
+
+By default `cc → codex` copies only the root `CLAUDE.md`. Claude Code, though, loads a *hierarchy*: `CLAUDE.md` + `.claude/CLAUDE.md` + `.claude/rules/*.md` + `@`-imports. Pass `--compile` to synthesize all of it into one `AGENTS.md`, each part under a `## From <source>` header so it stays traceable:
+
+```sh
+ai-switch convert cc codex --compile --dry-run
+ai-switch convert cc codex --compile --yes
+ai-switch convert cc codex --compile --include-local --yes   # also fold in CLAUDE.local.md
+```
+
+- `@path` lines are inlined with `<!-- included from … -->` markers.
+- **Safe by default:** `CLAUDE.local.md` is excluded unless you pass `--include-local`; an include is only inlined if it's a repo-relative text file (`.md/.txt/.json/.yaml/.yml/.toml`) under 40KB (200KB total). Absolute/`~` paths, missing files, wrong types, and circular includes are **left in place and reported for manual review** — never silently dropped.
+- Default convert (without `--compile`) is unchanged.
+
 ## Scope & audit
 
 ai-switch migrates three surfaces — **instructions, MCP servers, and skills**. Claude Code has more (`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, `.claude/agents`, `.claude/commands`, settings `hooks`/`permissions`/…), and those don't have clean one-to-one Codex equivalents. Rather than pretend, `ai-switch audit` lists everything it finds and classifies it:
@@ -191,7 +205,7 @@ Every migration report also includes an **"Other Claude surfaces detected"** sec
 - ✅ Global `convert --global` (allowlist-only) for home-level config (0.3.0)
 - ✅ `.agents/skills` coverage + HTTP MCP `url` conversion (0.4.0)
 - ✅ `audit` — classify Claude surfaces as migrated / manual / not-portable (0.5.0)
-- `compile-instructions` — synthesize the CLAUDE.md hierarchy (`.claude/rules`, includes) into AGENTS.md
+- ✅ `convert --compile` — synthesize the CLAUDE.md hierarchy (`.claude/rules`, `@`-includes) into AGENTS.md (0.6.0)
 - `handoff` — export a concise project-context summary for the next agent (never raw chat history)
 - Adapters for Gemini CLI and Cursor
 - Preserve comments and unknown fields when writing Codex TOML

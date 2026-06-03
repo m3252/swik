@@ -1,11 +1,43 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { copyFile, cp, mkdir, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  copyTree,
+  listBackups,
+  listGlobalBackups,
+  makeBackup,
+  makeGlobalBackup,
+  refreshCreatedHashes,
+  restoreBackup,
+  restoreGlobalBackup
+} from "./backups.js";
+import { fileChanges } from "./changes.js";
+import { compileInstructions } from "./instructions.js";
+import { listDir, readJson, readText } from "./io.js";
+import {
+  analyzeClaudeMcp,
+  analyzeClaudeMcpSources,
+  analyzeCodexMcp,
+  analyzeCodexMcpFromToml,
+  codexMcpNames,
+  collectCredentials,
+  countCodexMcpServers,
+  countMcpServers,
+  credentialLines,
+  extractClaudeMcp,
+  extractCodexMcp,
+  globalConfigScanList,
+  literalEnvNamesInConfigs,
+  projectConfigScanList,
+  toClaudeMcpServers,
+  toCodexToml,
+  withReferencedEnv
+} from "./mcp.js";
+import { RELATIVE_PATHS, codexSkillSources, globalPathsFor, projectPaths } from "./paths.js";
 
 const require = createRequire(import.meta.url);
 const { version: VERSION } = require("../package.json");
@@ -13,77 +45,6 @@ const { version: VERSION } = require("../package.json");
 const ROOT = process.cwd();
 const SUPPORTED = new Set(["cc", "claude", "claude-code", "codex"]);
 const MIGRATION_HEADER = /^# Project Instructions\n\nMigrated from (CLAUDE\.md|AGENTS\.md) by ai-switch\.\n\n/;
-const RELATIVE_PATHS = {
-  claudeMd: "CLAUDE.md",
-  agentsMd: "AGENTS.md",
-  mcpJson: ".mcp.json",
-  claudeDir: ".claude",
-  claudeSettings: path.join(".claude", "settings.json"),
-  claudeSkills: path.join(".claude", "skills"),
-  codexDir: ".codex",
-  codexConfig: path.join(".codex", "config.toml"),
-  codexSkills: path.join(".codex", "skills"),
-  agentsDir: ".agents",
-  agentsSkills: path.join(".agents", "skills"),
-  report: "ai-switch-report.md",
-  backupDir: ".ai-switch-backups"
-};
-const GLOBAL_RELATIVE_PATHS = {
-  backupDir: path.join(".ai-switch", "backups", "global")
-};
-
-function projectPaths(cwd) {
-  return Object.fromEntries(Object.entries(RELATIVE_PATHS).map(([key, value]) => [key, path.join(cwd, value)]));
-}
-
-function globalPaths(home) {
-  return globalPathsFor(home);
-}
-
-function globalPathsFor(home, env = process.env) {
-  const claudeRoot = path.resolve(env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"));
-  const codexRoot = path.resolve(env.CODEX_HOME ?? path.join(home, ".codex"));
-  return {
-    claudeRoot,
-    codexRoot,
-    claudeMd: path.join(claudeRoot, RELATIVE_PATHS.claudeMd),
-    claudeSettings: path.join(claudeRoot, "settings.json"),
-    claudeSkills: path.join(claudeRoot, "skills"),
-    agentsMd: path.join(codexRoot, RELATIVE_PATHS.agentsMd),
-    codexConfig: path.join(codexRoot, "config.toml"),
-    codexSkills: path.join(codexRoot, "skills"),
-    // Codex's current (preferred) skill location is ~/.agents/skills, independent
-    // of CODEX_HOME; ~/.codex/skills is the deprecated-but-still-read fallback.
-    agentsSkills: path.join(home, ".agents", "skills"),
-    backupDir: path.join(home, GLOBAL_RELATIVE_PATHS.backupDir),
-    report: path.join(home, ".ai-switch", RELATIVE_PATHS.report)
-  };
-}
-
-// The ONLY global files ai-switch reads or writes. Everything else under
-// ~/.claude and ~/.codex (auth.json, sessions/, state_*.sqlite, logs, caches,
-// rollouts, vendor_imports, ...) is deliberately untouched. Each entry has a
-// stable backup key so backup/restore works regardless of CLAUDE_CONFIG_DIR /
-// CODEX_HOME relocation.
-function globalAllowlist(files) {
-  return [
-    { key: "claude/CLAUDE.md", path: files.claudeMd, dir: false },
-    { key: "claude/settings.json", path: files.claudeSettings, dir: false },
-    { key: "claude/skills", path: files.claudeSkills, dir: true },
-    { key: "codex/AGENTS.md", path: files.agentsMd, dir: false },
-    { key: "codex/config.toml", path: files.codexConfig, dir: false },
-    { key: "codex/skills", path: files.codexSkills, dir: true },
-    { key: "agents/skills", path: files.agentsSkills, dir: true }
-  ];
-}
-
-// Codex reads skills from both .codex/skills and the newer .agents/skills
-// (project), and ~/.codex/skills (deprecated) and ~/.agents/skills (preferred,
-// global). When migrating into Claude we read every existing source; when
-// writing into Codex we target the preferred .agents/skills location.
-function codexSkillSources(files) {
-  return [files.codexSkills, files.agentsSkills];
-}
 
 function skillCopyChanges(sources, target) {
   return sources.filter((source) => existsSync(source)).map((source) => ({ kind: "copy-dir", from: source, path: target }));
@@ -106,6 +67,7 @@ Usage:
   ai-switch backups [--cwd <path>] [--global [--home <path>]]
   ai-switch restore <latest|timestamp> [--cwd <path>] [--force] [--global [--home <path>]]
   ai-switch convert <cc|codex> <cc|codex> [--cwd <path>] [--dry-run] [--yes] [--force]
+  ai-switch convert cc codex --compile [--include-local] [--dry-run] [--yes]
   ai-switch convert <cc|codex> <cc|codex> --global [--home <path>] [--dry-run] [--yes] [--force]
   ai-switch --version
 
@@ -141,6 +103,8 @@ function parseArgs(argv) {
     else if (arg === "--yes" || arg === "-y") args.yes = true;
     else if (arg === "--force") args.force = true;
     else if (arg === "--global") args.global = true;
+    else if (arg === "--compile") args.compile = true;
+    else if (arg === "--include-local") args.includeLocal = true;
     else if (arg === "--help" || arg === "-h") args.help = true;
     else if (arg === "--version" || arg === "-v") args.version = true;
     else if (arg.startsWith("--")) throw new Error(`Unknown option: ${arg}`);
@@ -153,25 +117,6 @@ function parseArgs(argv) {
 function normalizeProvider(provider) {
   if (!SUPPORTED.has(provider)) throw new Error(`Unsupported provider: ${provider}`);
   return provider === "codex" ? "codex" : "cc";
-}
-
-function readText(file) {
-  return existsSync(file) ? readFileSync(file, "utf8") : undefined;
-}
-
-function readJson(file) {
-  const text = readText(file);
-  if (!text) return undefined;
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    return { __parseError: error.message };
-  }
-}
-
-function listDir(dir) {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).map((name) => path.join(dir, name));
 }
 
 function detect(cwd) {
@@ -231,589 +176,13 @@ function detectGlobal(home = homedir(), env = process.env) {
   };
 }
 
-function countMcpServers(servers) {
-  return servers && typeof servers === "object" ? Object.keys(servers).length : 0;
-}
-
-function countCodexMcpServers(toml) {
-  if (!toml) return 0;
-  return [...toml.matchAll(/^\[mcp_servers\."?([^"\]\n]+)"?\]/gm)].length;
-}
-
-function codexMcpNames(toml) {
-  if (!toml) return new Set();
-  return new Set([...toml.matchAll(/^\[mcp_servers\."?([^"\]\n]+)"?\]/gm)].map((match) => match[1]));
-}
-
-function extractClaudeMcp(cwd) {
-  return analyzeClaudeMcpSources(cwd).servers;
-}
-
-function analyzeClaudeMcpSources(cwd, parsed = {}) {
-  const files = projectPaths(cwd);
-  const settings = parsed.settings ?? readJson(files.claudeSettings);
-  const mcpJson = parsed.mcpJson ?? readJson(files.mcpJson);
-  const servers = {};
-  const manualReviews = [];
-  const planItems = [];
-
-  for (const [sourceName, sourceServers] of [
-    [".claude/settings.json", settings?.__parseError ? undefined : settings?.mcpServers],
-    [".mcp.json", mcpJson?.__parseError ? undefined : mcpJson?.mcpServers]
-  ]) {
-    if (!sourceServers || typeof sourceServers !== "object") continue;
-    for (const [name, server] of Object.entries(sourceServers)) {
-      if (Object.hasOwn(servers, name)) {
-        manualReviews.push(`Claude MCP server "${name}" exists in multiple Claude MCP sources; kept the first value and skipped ${sourceName}.`);
-        planItems.push({
-          kind: "skip",
-          label: `mcp: ${name}`,
-          reason: `Already found in another Claude MCP source; skipped ${sourceName}.`
-        });
-        continue;
-      }
-      servers[name] = server;
-    }
-  }
-
-  return { servers, manualReviews, planItems };
-}
-
-function extractCodexMcp(cwd) {
-  return analyzeCodexMcp(cwd).servers;
-}
-
-function analyzeCodexMcp(cwd) {
-  return analyzeCodexMcpFromToml(readText(projectPaths(cwd).codexConfig));
-}
-
-function analyzeCodexMcpFromToml(toml) {
-  if (!toml) return { servers: {}, manualReviews: [], planItems: [] };
-  const servers = {};
-  const manualReviews = [];
-  const planItems = [];
-
-  // Group TOML tables by MCP server, merging a nested [mcp_servers.<name>.env]
-  // sub-table into its parent. Splitting on every table header (not just the
-  // next mcp_servers one) keeps unrelated tables like [profiles.default] from
-  // leaking their keys into an MCP server's field list.
-  const order = [];
-  const raw = new Map();
-  for (const section of toml.split(/\n(?=\[)/g)) {
-    const header = section.match(/^\[([^\]\n]*)\]/);
-    if (!header) continue;
-    const segs = parseTomlHeaderPath(header[1]);
-    if (segs[0] !== "mcp_servers" || segs.length < 2) continue;
-    const name = segs[1];
-    if (!raw.has(name)) { raw.set(name, { command: undefined, args: undefined, env: undefined, url: undefined, hasAuth: false, unsupported: [] }); order.push(name); }
-    const entry = raw.get(name);
-    const body = section.slice(header[0].length);
-    if (segs.length === 2) {
-      entry.command = parseTomlValue(extractTomlRawValue(section, "command"));
-      entry.args = parseTomlValue(extractTomlRawValue(section, "args"));
-      entry.url = parseTomlValue(extractTomlRawValue(section, "url"));
-      const inlineEnv = parseTomlValue(extractTomlRawValue(section, "env"));
-      if (inlineEnv) entry.env = { ...(entry.env ?? {}), ...inlineEnv };
-      const handled = ["command", "args", "env", "url", "bearer_token_env_var", "http_headers", "env_http_headers"];
-      for (const field of [...body.matchAll(/^([A-Za-z0-9_-]+)[ \t]*=/gm)].map((match) => match[1])) {
-        if (["bearer_token_env_var", "http_headers", "env_http_headers"].includes(field)) entry.hasAuth = true;
-        if (!handled.includes(field) && !entry.unsupported.includes(field)) entry.unsupported.push(field);
-      }
-    } else if (segs.length === 3 && segs[2] === "env") {
-      entry.env = { ...(entry.env ?? {}), ...parseTomlKeyValueBlock(body) };
-    } else if (!entry.unsupported.includes(segs.slice(2).join("."))) {
-      entry.unsupported.push(segs.slice(2).join("."));
-    }
-  }
-
-  for (const name of order) {
-    const entry = raw.get(name);
-    const flagUnsupported = () => {
-      if (entry.unsupported.length === 0) return;
-      manualReviews.push(`Codex MCP server "${name}" has unsupported fields not migrated: ${entry.unsupported.join(", ")}.`);
-      planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: `Unsupported fields not migrated: ${entry.unsupported.join(", ")}.` });
-    };
-    if (entry.command) {
-      const server = { command: entry.command, args: entry.args, env: entry.env };
-      flagUnsupported();
-      addAbsolutePathReviews({ name, server, manualReviews, planItems });
-      servers[name] = server;
-      continue;
-    }
-    if (typeof entry.url === "string") {
-      if (entry.hasAuth) {
-        manualReviews.push(`Codex MCP server "${name}" is an HTTP server; its URL was migrated, but auth (bearer_token_env_var / http_headers) needs manual setup in Claude.`);
-        planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: "HTTP server URL migrated; auth needs manual setup." });
-      }
-      flagUnsupported();
-      servers[name] = { url: entry.url };
-      continue;
-    }
-    manualReviews.push(`Codex MCP server "${name}" was not converted because it has no stdio command or url.`);
-    planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: "Codex MCP section has no stdio command or url." });
-  }
-  return { servers, manualReviews, planItems };
-}
-
-// --- Minimal dependency-free reader for the TOML value forms used by MCP
-// configs: quoted strings, arrays of strings, and inline tables. Unlike a
-// single-line regex, this handles multi-line `args`/`env` and quoted values
-// that contain commas or "=".
-function extractTomlRawValue(section, key) {
-  const match = section.match(new RegExp(`^${key}[ \\t]*=[ \\t]*`, "m"));
-  if (!match) return undefined;
-  return readTomlValueSpan(section, match.index + match[0].length);
-}
-
-function readTomlValueSpan(text, start) {
-  while (start < text.length && (text[start] === " " || text[start] === "\t")) start += 1;
-  const open = text[start];
-  if (open === "\"" || open === "'") return text.slice(start, scanTomlString(text, start));
-  if (open === "[" || open === "{") {
-    const close = open === "[" ? "]" : "}";
-    let depth = 0;
-    for (let i = start; i < text.length; i += 1) {
-      const ch = text[i];
-      if (ch === "\"" || ch === "'") { i = scanTomlString(text, i) - 1; continue; }
-      if (ch === "#") { const nl = text.indexOf("\n", i); if (nl === -1) return text.slice(start); i = nl; continue; }
-      if (ch === open) depth += 1;
-      else if (ch === close && (depth -= 1) === 0) return text.slice(start, i + 1);
-    }
-    return text.slice(start);
-  }
-  const nl = text.indexOf("\n", start);
-  const raw = nl === -1 ? text.slice(start) : text.slice(start, nl);
-  const comment = raw.indexOf("#");
-  return (comment === -1 ? raw : raw.slice(0, comment)).trim();
-}
-
-// Index just past the closing quote of the string starting at `start`.
-function scanTomlString(text, start) {
-  const quote = text[start];
-  for (let i = start + 1; i < text.length; i += 1) {
-    if (quote === "\"" && text[i] === "\\") { i += 1; continue; }
-    if (text[i] === quote) return i + 1;
-  }
-  return text.length;
-}
-
-function parseTomlValue(raw) {
-  if (raw === undefined) return undefined;
-  const text = raw.trim();
-  if (text === "") return undefined;
-  if (text[0] === "[") return splitTomlList(text.slice(1, -1)).map(parseTomlValue);
-  if (text[0] === "{") return parseTomlInlineTable(text.slice(1, -1));
-  return parseTomlScalar(text);
-}
-
-function parseTomlInlineTable(body) {
-  const out = {};
-  for (const pair of splitTomlList(body)) {
-    const eq = topLevelEqualsIndex(pair);
-    if (eq === -1) continue;
-    out[unquoteTomlKey(pair.slice(0, eq).trim())] = parseTomlValue(pair.slice(eq + 1).trim());
-  }
-  return out;
-}
-
-function parseTomlScalar(text) {
-  if (text[0] === "\"") {
-    try { return JSON.parse(text); } catch { return text.slice(1, -1); }
-  }
-  if (text[0] === "'") return text.slice(1, text.endsWith("'") ? -1 : text.length);
-  if (text === "true") return true;
-  if (text === "false") return false;
-  return text;
-}
-
-// Split a comma-separated TOML body at top level, respecting strings and
-// nested []/{}. Trailing commas and empty entries are dropped.
-function splitTomlList(body) {
-  const parts = [];
-  let depth = 0;
-  let current = "";
-  for (let i = 0; i < body.length; i += 1) {
-    const ch = body[i];
-    if (ch === "\"" || ch === "'") {
-      const end = scanTomlString(body, i);
-      current += body.slice(i, end);
-      i = end - 1;
-      continue;
-    }
-    if (ch === "#") { const nl = body.indexOf("\n", i); if (nl === -1) break; i = nl; continue; }
-    if (ch === "[" || ch === "{") depth += 1;
-    else if (ch === "]" || ch === "}") depth -= 1;
-    if (ch === "," && depth === 0) { parts.push(current); current = ""; continue; }
-    current += ch;
-  }
-  parts.push(current);
-  return parts.map((part) => part.trim()).filter((part) => part !== "");
-}
-
-function topLevelEqualsIndex(pair) {
-  let depth = 0;
-  for (let i = 0; i < pair.length; i += 1) {
-    const ch = pair[i];
-    if (ch === "\"" || ch === "'") { i = scanTomlString(pair, i) - 1; continue; }
-    if (ch === "[" || ch === "{") depth += 1;
-    else if (ch === "]" || ch === "}") depth -= 1;
-    else if (ch === "=" && depth === 0) return i;
-  }
-  return -1;
-}
-
-function unquoteTomlKey(key) {
-  if ((key[0] === "\"" && key.endsWith("\"")) || (key[0] === "'" && key.endsWith("'"))) {
-    return key.slice(1, -1);
-  }
-  return key;
-}
-
-// Split a dotted table header (the text between [ and ]) into key segments,
-// honoring quoted segments. `mcp_servers.node_repl.env` -> [mcp_servers, node_repl, env];
-// `mcp_servers."a.b"` -> [mcp_servers, "a.b"].
-function parseTomlHeaderPath(inner) {
-  const segs = [];
-  let i = 0;
-  while (i < inner.length) {
-    while (i < inner.length && (inner[i] === " " || inner[i] === "\t" || inner[i] === ".")) i += 1;
-    if (i >= inner.length) break;
-    if (inner[i] === "\"" || inner[i] === "'") {
-      const end = scanTomlString(inner, i);
-      segs.push(parseTomlScalar(inner.slice(i, end)));
-      i = end;
-    } else {
-      let j = i;
-      while (j < inner.length && inner[j] !== "." && inner[j] !== " " && inner[j] !== "\t") j += 1;
-      segs.push(inner.slice(i, j));
-      i = j;
-    }
-  }
-  return segs;
-}
-
-// Parse a block of `key = value` lines (the body of an [mcp_servers.x.env]
-// sub-table) into an object.
-function parseTomlKeyValueBlock(text) {
-  const out = {};
-  for (const rawLine of text.split("\n")) {
-    const line = rawLine.trim();
-    if (line === "" || line[0] === "#" || line[0] === "[") continue;
-    const eq = topLevelEqualsIndex(line);
-    if (eq === -1) continue;
-    out[unquoteTomlKey(line.slice(0, eq).trim())] = parseTomlValue(readTomlValueSpan(line, eq + 1));
-  }
-  return out;
-}
-
-function toCodexToml(servers) {
-  return Object.entries(servers).map(([name, server]) => {
-    const lines = [`[mcp_servers."${escapeToml(name)}"]`];
-    if (server.url) {
-      lines.push(`url = "${escapeToml(server.url)}"`);
-    } else {
-      if (server.command) lines.push(`command = "${escapeToml(server.command)}"`);
-      if (Array.isArray(server.args)) lines.push(`args = ${JSON.stringify(server.args)}`);
-      if (server.env && Object.keys(server.env).length > 0) {
-        const env = Object.entries(server.env)
-          .map(([key, value]) => `"${escapeToml(key)}" = "${escapeToml(String(value))}"`)
-          .join(", ");
-        lines.push(`env = { ${env} }`);
-      }
-    }
-    return `${lines.join("\n")}\n`;
-  }).join("\n");
-}
-
-// Shape a normalized server map into Claude's .mcp.json / settings.json form:
-// HTTP servers become { type: "http", url }, stdio servers keep command/args/env
-// with literal env values rewritten to $NAME references.
-function toClaudeMcpServers(servers) {
-  return Object.fromEntries(Object.entries(servers).map(([name, def]) => {
-    if (def?.url) return [name, { type: "http", url: def.url }];
-    const out = {};
-    if (def?.command !== undefined) out.command = def.command;
-    if (def?.args !== undefined) out.args = def.args;
-    if (def?.env) out.env = referenceEnv(def.env);
-    return [name, out];
-  }));
-}
-
-function analyzeClaudeMcp(servers, existingCodexNames = new Set()) {
-  const supported = {};
-  const manualReviews = [];
-  const planItems = [];
-  for (const [name, server] of Object.entries(servers)) {
-    if (existingCodexNames.has(name)) {
-      manualReviews.push(`Claude MCP server "${name}" was skipped because Codex config already has a server with that name.`);
-      planItems.push({
-        kind: "skip",
-        label: `mcp: ${name}`,
-        reason: "Codex config already has a server with that name."
-      });
-      continue;
-    }
-    if (server?.command) {
-      const unsupportedFields = Object.keys(server).filter((field) => !["command", "args", "env"].includes(field));
-      if (unsupportedFields.length > 0) {
-        manualReviews.push(`Claude MCP server "${name}" has unsupported fields not migrated: ${unsupportedFields.join(", ")}.`);
-        planItems.push({
-          kind: "manual-review",
-          label: `mcp: ${name}`,
-          reason: `Unsupported fields not migrated: ${unsupportedFields.join(", ")}.`
-        });
-      }
-      addAbsolutePathReviews({ name, server, manualReviews, planItems });
-      supported[name] = { command: server.command, args: server.args, env: server.env };
-      continue;
-    }
-    if (typeof server?.url === "string") {
-      // Codex's url transport is HTTP (StreamableHttp). Only auto-convert http
-      // (or untyped) url servers; sse/ws/other transports differ and stay manual.
-      if (server.type !== undefined && server.type !== "http") {
-        manualReviews.push(`Claude MCP server "${name}" uses the "${server.type}" transport; only "http" (or untyped) url servers are auto-converted to Codex. Migrate it manually.`);
-        planItems.push({
-          kind: "manual-review",
-          label: `mcp: ${name}`,
-          reason: `Transport "${server.type}" is not auto-converted; only http url servers are.`
-        });
-        continue;
-      }
-      const hasAuth = server.headers || Object.keys(server).some((field) => !["type", "url"].includes(field));
-      if (hasAuth) {
-        manualReviews.push(`Claude MCP server "${name}" is an HTTP server; its URL was migrated, but auth headers need manual setup in Codex (bearer_token_env_var / http_headers).`);
-        planItems.push({
-          kind: "manual-review",
-          label: `mcp: ${name}`,
-          reason: "HTTP server URL migrated; auth headers need manual setup."
-        });
-      }
-      supported[name] = { url: server.url };
-      continue;
-    }
-    const fields = server && typeof server === "object" ? Object.keys(server).join(", ") : "non-object value";
-    manualReviews.push(`Claude MCP server "${name}" needs manual migration; only stdio (command/args/env) or HTTP (url) servers are converted automatically. Found fields: ${fields}.`);
-    planItems.push({
-      kind: "manual-review",
-      label: `mcp: ${name}`,
-      reason: `Only stdio (command) or HTTP (url) servers are converted automatically. Found fields: ${fields}.`
-    });
-  }
-  return { supported, manualReviews, planItems };
-}
-
-function addAbsolutePathReviews({ name, server, manualReviews, planItems }) {
-  const paths = findAbsolutePathsInMcpServer(server);
-  if (paths.length === 0) return;
-  const uniquePaths = [...new Set(paths)];
-  const rendered = uniquePaths.join(", ");
-  manualReviews.push(`MCP server "${name}" contains local absolute path values that may not work on another machine: ${rendered}.`);
-  planItems.push({
-    kind: "manual-review",
-    label: `mcp: ${name}`,
-    reason: `Contains local absolute path values: ${rendered}.`
-  });
-}
-
-function findAbsolutePathsInMcpServer(server) {
-  const values = [
-    server?.command,
-    ...(Array.isArray(server?.args) ? server.args : []),
-    ...Object.values(server?.env ?? {})
-  ];
-  return values
-    .filter((value) => typeof value === "string")
-    .filter((value) => looksLikeLocalAbsolutePath(value));
-}
-
-function looksLikeLocalAbsolutePath(value) {
-  if (/^[a-zA-Z]+:\/\//.test(value)) return false;
-  if (/^[A-Za-z]:[\\/]/.test(value)) return true;
-  return value.startsWith("/") && !value.startsWith("//");
-}
-
-function escapeToml(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
-}
-
-async function makeBackup(cwd, changes = []) {
-  const files = projectPaths(cwd);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupDir = path.join(files.backupDir, stamp);
-  await mkdir(backupDir, { recursive: true });
-  const backedUp = [];
-  const planned = fileChanges(changes).map((change) => path.relative(cwd, change.path));
-  for (const relative of [RELATIVE_PATHS.claudeMd, RELATIVE_PATHS.agentsMd, RELATIVE_PATHS.mcpJson, RELATIVE_PATHS.claudeDir, RELATIVE_PATHS.codexDir, RELATIVE_PATHS.agentsDir, RELATIVE_PATHS.report]) {
-    const source = path.join(cwd, relative);
-    if (!existsSync(source)) continue;
-    const target = path.join(backupDir, relative);
-    await mkdir(path.dirname(target), { recursive: true });
-    if (statSync(source).isDirectory()) await copyTree(source, target);
-    else await copyFile(source, target);
-    backedUp.push(relative);
-  }
-  const created = {};
-  for (const change of changes) {
-    if (!change.path || existsSync(change.path)) continue;
-    const relative = path.relative(cwd, change.path);
-    const expectedHash = expectedHashForChange(change);
-    if (expectedHash) created[relative] = expectedHash;
-  }
-  await writeFile(path.join(backupDir, ".ai-switch-manifest.json"), `${JSON.stringify({ createdAt: stamp, backedUp, planned, created }, null, 2)}\n`);
-  return backupDir;
-}
-
-function expectedHashForChange(change) {
-  if (change.kind === "write") return hashText(change.content);
-  if (change.kind === "copy-dir") return hashPath(change.from);
-  return undefined;
-}
-
-// After changes are applied, recompute every migration-created hash from the
-// actual files on disk. The pre-apply estimate is wrong when several changes
-// merge into one target (e.g. .codex/skills + .agents/skills -> .claude/skills),
-// which would otherwise make `restore` think its own output was user-edited.
-async function refreshCreatedHashes(backupDir, resolve) {
-  const manifestPath = path.join(backupDir, ".ai-switch-manifest.json");
-  const manifest = readJson(manifestPath);
-  if (!manifest || manifest.__parseError || !manifest.created) return;
-  for (const key of Object.keys(manifest.created)) {
-    const target = resolve(key);
-    if (existsSync(target)) manifest.created[key] = hashPath(target);
-  }
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
-function hashText(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function hashPath(target) {
-  if (!existsSync(target)) return undefined;
-  const stats = lstatSync(target);
-  if (stats.isSymbolicLink()) return hashText(`symlink:${readlinkSync(target)}`);
-  if (!stats.isDirectory()) {
-    if (!stats.isFile()) return undefined;
-    return hashText(readFileSync(target));
-  }
-
-  const hash = createHash("sha256");
-  hash.update("dir\n");
-  for (const name of readdirSync(target).sort()) {
-    const child = path.join(target, name);
-    const childHash = hashPath(child);
-    if (childHash === undefined) continue;
-    hash.update(`${name}\0${childHash}\n`);
-  }
-  return hash.digest("hex");
-}
-
-async function copyTree(from, to) {
-  await cp(from, to, {
-    recursive: true,
-    filter: (source) => isCopyablePath(source)
-  });
-}
-
-function isCopyablePath(source) {
-  try {
-    const stats = lstatSync(source);
-    return stats.isDirectory() || stats.isFile() || stats.isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
-function listBackups(cwd) {
-  return listBackupDirs(projectPaths(cwd).backupDir);
-}
-
-function listGlobalBackups(home = homedir()) {
-  return listBackupDirs(globalPathsFor(home).backupDir);
-}
-
-function listBackupDirs(dir) {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => existsSync(path.join(dir, name, ".ai-switch-manifest.json")))
-    .sort();
-}
-
-async function restoreBackup(cwd, selector, options = {}) {
-  const backups = listBackups(cwd);
-  if (backups.length === 0) throw new Error("No ai-switch backups found.");
-  const stamp = selector === "latest" ? backups.at(-1) : selector;
-  if (!backups.includes(stamp)) throw new Error(`Backup not found: ${selector}`);
-
-  const backupDir = path.join(projectPaths(cwd).backupDir, stamp);
-  const manifest = readJson(path.join(backupDir, ".ai-switch-manifest.json"));
-  if (!manifest || manifest.__parseError) throw new Error(`Invalid backup manifest: ${stamp}`);
-
-  const removals = (manifest.planned ?? []).filter((relative) => !(manifest.backedUp ?? []).includes(relative));
-  for (const relative of removals) {
-    assertGeneratedPathUnchanged(cwd, relative, manifest, options.force);
-  }
-
-  for (const relative of removals) {
-    const target = path.join(cwd, relative);
-    if (existsSync(target)) await rm(target, { recursive: true, force: true });
-  }
-  await pruneEmptyParents(cwd, manifest.planned ?? [], manifest.backedUp ?? []);
-
-  for (const relative of manifest.backedUp ?? []) {
-    const source = path.join(backupDir, relative);
-    const target = path.join(cwd, relative);
-    if (!existsSync(source)) continue;
-    await mkdir(path.dirname(target), { recursive: true });
-    if (statSync(source).isDirectory()) {
-      await rm(target, { recursive: true, force: true });
-      await copyTree(source, target);
-    }
-    else await copyFile(source, target);
-  }
-
-  return backupDir;
-}
-
-function assertGeneratedPathUnchanged(cwd, relative, manifest, force = false) {
-  const target = path.join(cwd, relative);
-  if (!existsSync(target)) return;
-  const expectedHash = manifest.created?.[relative];
-  if (!expectedHash) {
-    if (!force) throw new Error(`Refusing to remove ${relative}; backup has no hash metadata. Re-run restore with --force to remove it.`);
-    return;
-  }
-  const actualHash = hashPath(target);
-  if (actualHash !== expectedHash && !force) {
-    throw new Error(`Refusing to remove changed migration-created path without --force: ${relative}`);
-  }
-}
-
-async function pruneEmptyParents(cwd, planned, backedUp) {
-  const backedUpSet = new Set(backedUp);
-  for (const relative of planned) {
-    if (backedUpSet.has(relative)) continue;
-    let dir = path.dirname(path.join(cwd, relative));
-    while (dir !== cwd && dir.startsWith(cwd)) {
-      const rel = path.relative(cwd, dir);
-      if (!rel || rel === RELATIVE_PATHS.backupDir || rel.startsWith(`${RELATIVE_PATHS.backupDir}${path.sep}`)) break;
-      try {
-        await rmdir(dir);
-      } catch {
-        break;
-      }
-      dir = path.dirname(dir);
-    }
-  }
-}
-
 async function convert(fromRaw, toRaw, options) {
   const from = normalizeProvider(fromRaw);
   const to = normalizeProvider(toRaw);
   if (from === to) throw new Error("Source and target providers are the same.");
 
   const changes = from === "cc"
-    ? planCcToCodex(options.cwd)
+    ? planCcToCodex(options.cwd, options)
     : planCodexToCc(options.cwd);
 
   if (options.dryRun) {
@@ -963,91 +332,6 @@ function assertNoUnsafeOverwritesGlobal(changes, files, force = false) {
   }
 }
 
-async function makeGlobalBackup(home, env, changes) {
-  const files = globalPathsFor(home, env);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupDir = path.join(files.backupDir, stamp);
-  await mkdir(backupDir, { recursive: true });
-  const backedUp = [];
-  for (const item of globalAllowlist(files)) {
-    if (!existsSync(item.path)) continue;
-    const target = path.join(backupDir, item.key);
-    await mkdir(path.dirname(target), { recursive: true });
-    if (statSync(item.path).isDirectory()) await copyTree(item.path, target);
-    else await copyFile(item.path, target);
-    backedUp.push({ key: item.key, target: item.path });
-  }
-  const planned = fileChanges(changes).map((change) => change.path);
-  const created = {};
-  for (const change of changes) {
-    if (!change.path || existsSync(change.path)) continue;
-    const hash = expectedHashForChange(change);
-    if (hash) created[change.path] = hash;
-  }
-  await writeFile(path.join(backupDir, ".ai-switch-manifest.json"),
-    `${JSON.stringify({ scope: "global", createdAt: stamp, backedUp, planned, created }, null, 2)}\n`);
-  return backupDir;
-}
-
-async function restoreGlobalBackup(home, selector, env = process.env, options = {}) {
-  const files = globalPathsFor(home, env);
-  const backups = listBackupDirs(files.backupDir);
-  if (backups.length === 0) throw new Error("No ai-switch global backups found.");
-  const stamp = selector === "latest" ? backups.at(-1) : selector;
-  if (!backups.includes(stamp)) throw new Error(`Global backup not found: ${selector}`);
-
-  const backupDir = path.join(files.backupDir, stamp);
-  const manifest = readJson(path.join(backupDir, ".ai-switch-manifest.json"));
-  if (!manifest || manifest.__parseError) throw new Error(`Invalid backup manifest: ${stamp}`);
-
-  const backedUpTargets = new Set((manifest.backedUp ?? []).map((entry) => entry.target));
-  const removals = (manifest.planned ?? []).filter((target) => !backedUpTargets.has(target));
-  for (const target of removals) assertGeneratedAbsUnchanged(target, manifest, options.force);
-  for (const target of removals) {
-    if (existsSync(target)) await rm(target, { recursive: true, force: true });
-  }
-  await pruneEmptyParentsAbs(removals, home);
-  for (const entry of manifest.backedUp ?? []) {
-    const source = path.join(backupDir, entry.key);
-    if (!existsSync(source)) continue;
-    await mkdir(path.dirname(entry.target), { recursive: true });
-    if (statSync(source).isDirectory()) {
-      await rm(entry.target, { recursive: true, force: true });
-      await copyTree(source, entry.target);
-    } else await copyFile(source, entry.target);
-  }
-  return backupDir;
-}
-
-// Remove now-empty directories left behind after deleting migration-created
-// files (e.g. a fresh ~/.codex). rmdir fails on non-empty dirs, so anything
-// still holding auth/sessions/other files is preserved. Stops at `home`.
-async function pruneEmptyParentsAbs(paths, stopDir) {
-  for (const target of paths) {
-    let dir = path.dirname(target);
-    while (dir.startsWith(stopDir) && dir !== stopDir && dir !== path.dirname(dir)) {
-      try {
-        await rmdir(dir);
-      } catch {
-        break;
-      }
-      dir = path.dirname(dir);
-    }
-  }
-}
-
-function assertGeneratedAbsUnchanged(target, manifest, force = false) {
-  if (!existsSync(target)) return;
-  const expectedHash = manifest.created?.[target];
-  if (!expectedHash) {
-    if (!force) throw new Error(`Refusing to remove ${target}; backup has no hash metadata. Re-run restore with --force to remove it.`);
-    return;
-  }
-  if (hashPath(target) !== expectedHash && !force) {
-    throw new Error(`Refusing to remove changed migration-created path without --force: ${target}`);
-  }
-}
-
 function assertProjectWriteScope(cwd) {
   if (!isHomeDirectory(cwd)) return;
   throw new Error("Refusing project migration in your home directory. Run convert/backup/restore inside a project directory, or use `--global` for home-level config (e.g. `ai-switch convert cc codex --global`).");
@@ -1065,17 +349,18 @@ function realPathOrResolve(target) {
   }
 }
 
-function planCcToCodex(cwd) {
+function planCcToCodex(cwd, options = {}) {
   const files = projectPaths(cwd);
   const changes = [];
   const manualReviews = [];
-  const claudeMd = readText(files.claudeMd);
-  if (claudeMd) {
-    changes.push({
-      kind: "write",
-      path: files.agentsMd,
-      content: migrateInstruction(claudeMd, "CLAUDE.md")
-    });
+  let compiled;
+  if (options.compile) {
+    compiled = compileInstructions(cwd, { includeLocal: options.includeLocal });
+    if (compiled.content) changes.push({ kind: "write", path: files.agentsMd, content: compiled.content });
+    manualReviews.push(...compiled.manualReviews);
+  } else {
+    const claudeMd = readText(files.claudeMd);
+    if (claudeMd) changes.push({ kind: "write", path: files.agentsMd, content: migrateInstruction(claudeMd, "CLAUDE.md") });
   }
 
   const sourceAnalysis = analyzeClaudeMcpSources(cwd);
@@ -1103,7 +388,7 @@ function planCcToCodex(cwd) {
     changes.push({ kind: "copy-dir", from: files.claudeSkills, path: files.agentsSkills });
   }
 
-  changes.push(reportChange(cwd, files.report, "cc", "codex", changes, manualReviews, credentials, auditSurfaces(cwd)));
+  changes.push(reportChange(cwd, files.report, "cc", "codex", changes, manualReviews, credentials, reportAuditSurfaces(cwd, { ...options, compiled })));
   return changes;
 }
 
@@ -1201,87 +486,19 @@ function reportChange(baseDir, reportPath, from, to, changes, manualReviews = []
   };
 }
 
-// Inventory the env vars the migrated MCP servers depend on, without ever
-// emitting secret values. References like `$TOKEN` are safe to show; literal
-// values are flagged (redacted) so the user knows a real secret is sitting in
-// config and should be moved to the environment.
-function collectCredentials(serversMap) {
-  const credentials = [];
-  for (const [server, def] of Object.entries(serversMap)) {
-    if (!def?.env || typeof def.env !== "object") continue;
-    for (const [name, value] of Object.entries(def.env)) {
-      credentials.push({ server, name, isReference: isEnvReference(value) });
-    }
-  }
-  return credentials;
+function reportAuditSurfaces(cwd, options = {}) {
+  const surfaces = auditSurfaces(cwd);
+  if (!options.compile) return surfaces;
+
+  const compiledSources = new Set(options.compiled?.sources ?? []);
+  return surfaces.filter((surface) => !isCompiledInstructionSurface(surface.surface, compiledSources));
 }
 
-function isEnvReference(value) {
-  return typeof value === "string" && /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(value.trim());
-}
-
-// Scan the config files that a migration would back up (not just the servers it
-// converts) for literal env values, so the CLI warning covers secrets already
-// sitting in the existing target config too.
-function literalEnvNamesInConfigs(configs) {
-  const names = new Set();
-  for (const config of configs) {
-    if (!existsSync(config.path)) continue;
-    let servers = {};
-    if (config.format === "json") {
-      const data = readJson(config.path);
-      if (data && !data.__parseError && data.mcpServers && typeof data.mcpServers === "object") servers = data.mcpServers;
-    } else {
-      servers = analyzeCodexMcpFromToml(readText(config.path)).servers;
-    }
-    for (const def of Object.values(servers)) {
-      for (const [name, value] of Object.entries(def?.env ?? {})) {
-        if (!isEnvReference(value)) names.add(name);
-      }
-    }
-  }
-  return [...names];
-}
-
-function projectConfigScanList(cwd) {
-  const files = projectPaths(cwd);
-  return [
-    { path: files.mcpJson, format: "json" },
-    { path: files.claudeSettings, format: "json" },
-    { path: files.codexConfig, format: "toml" }
-  ];
-}
-
-function globalConfigScanList(home, env = process.env) {
-  const files = globalPathsFor(home, env);
-  return [
-    { path: files.claudeSettings, format: "json" },
-    { path: files.codexConfig, format: "toml" }
-  ];
-}
-
-// Never write a secret value into the target config. `$VAR` references pass
-// through unchanged; any literal value is replaced with a `$NAME` reference so
-// the wiring survives but the secret does not travel between tools.
-function referenceEnv(env) {
-  if (!env || typeof env !== "object") return env;
-  const out = {};
-  for (const [key, value] of Object.entries(env)) {
-    out[key] = isEnvReference(value) ? value : `$${key}`;
-  }
-  return out;
-}
-
-function withReferencedEnv(servers) {
-  return Object.fromEntries(Object.entries(servers).map(([name, def]) =>
-    [name, def?.env ? { ...def, env: referenceEnv(def.env) } : def]));
-}
-
-function credentialLines(credentials) {
-  if (credentials.length === 0) return ["- None"];
-  return credentials.map((cred) => cred.isReference
-    ? `- ${cred.name} (server: ${cred.server}) — referenced via env; set the same variable for the target tool`
-    : `- ${cred.name} (server: ${cred.server}) — source config had a literal value; written as \`$${cred.name}\` reference instead (the value was not copied). Set it in the environment, and rotate it if it was a secret`);
+function isCompiledInstructionSurface(surface, compiledSources) {
+  if (surface === ".claude/CLAUDE.md") return compiledSources.has(".claude/CLAUDE.md");
+  if (surface === "CLAUDE.local.md") return compiledSources.has("CLAUDE.local.md");
+  if (surface === ".claude/rules") return [...compiledSources].some((source) => source.startsWith(".claude/rules/"));
+  return false;
 }
 
 function assertNoUnsafeOverwrites(changes, cwd, force = false) {
@@ -1323,10 +540,6 @@ function printPlan(changes, cwd) {
     const item = planLabel(change, cwd);
     console.log(`${item.action.padEnd(13)} ${item.label}${item.reason ? ` (${item.reason})` : ""}`);
   }
-}
-
-function fileChanges(changes) {
-  return changes.filter((change) => change.path);
 }
 
 function printDetection(result) {
@@ -1569,6 +782,14 @@ async function main() {
 
 function validateScopeOptions(command, args) {
   if (args.home && !args.global) throw new Error("--home requires --global.");
+  if (args.includeLocal && !args.compile) throw new Error("--include-local requires --compile.");
+  if (args.compile) {
+    const [, from, to] = args._;
+    const fromIsClaude = ["cc", "claude", "claude-code"].includes(from);
+    if (command !== "convert" || args.global || !fromIsClaude || to !== "codex") {
+      throw new Error("--compile is only supported for project `convert cc codex`.");
+    }
+  }
   const globalCommands = new Set(["status", "convert", "backups", "restore"]);
   if (args.global && !globalCommands.has(command)) {
     throw new Error(`--global is not supported for "${command}". Use it with status, convert, backups, or restore.`);
@@ -1602,6 +823,7 @@ export {
   analyzeClaudeMcpSources,
   auditSurfaces,
   formatAudit,
+  compileInstructions,
   doctorReport,
   extractClaudeMcp,
   extractCodexMcp,

@@ -161,6 +161,20 @@ MCP 서버는 보통 시크릿(API 키, 토큰)이 필요합니다. ai-switch는
 
 > ai-switch는 **지속적인 에이전트 인스트럭션과 MCP 배선**을 옮깁니다 — raw 채팅 기록, 비공개 세션, 시크릿 값은 옮기지 않습니다.
 
+## 인스트럭션 계층 컴파일 (`--compile`)
+
+기본 `cc → codex` 변환은 루트 `CLAUDE.md`만 `AGENTS.md`로 옮깁니다. 하지만 Claude Code는 실제로 `CLAUDE.md` + `.claude/CLAUDE.md` + `.claude/rules/*.md` + `@` include 계층을 읽습니다. `--compile`을 쓰면 이 계층을 하나의 `AGENTS.md`로 합성하고, 각 조각을 `## From <source>` 헤더 아래에 넣어 출처를 추적할 수 있게 합니다:
+
+```sh
+ai-switch convert cc codex --compile --dry-run
+ai-switch convert cc codex --compile --yes
+ai-switch convert cc codex --compile --include-local --yes   # CLAUDE.local.md도 함께 합성
+```
+
+- `@path` 줄은 `<!-- included from … -->` 마커와 함께 인라인됩니다.
+- **기본은 안전 우선:** `CLAUDE.local.md`는 `--include-local`을 넘길 때만 포함됩니다. include는 프로젝트 내부의 텍스트 파일(`.md/.txt/.json/.yaml/.yml/.toml`)이고 40KB 이하(전체 200KB 이하)일 때만 인라인됩니다. 절대경로/`~` 경로, 누락 파일, 잘못된 타입, 순환 include는 **원래 줄을 남기고 수동 검토 항목으로 report**합니다.
+- `--compile` 없는 기본 변환 동작은 그대로입니다.
+
 ## 범위 & audit
 
 ai-switch가 옮기는 표면은 셋 — **인스트럭션, MCP 서버, 스킬**입니다. Claude Code엔 더 많은 표면(`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, `.claude/agents`, `.claude/commands`, settings의 `hooks`/`permissions`/…)이 있고, 이들은 Codex와 1:1로 깔끔히 대응되지 않습니다. 그래서 변환된 척하는 대신, `ai-switch audit`이 발견한 모든 것을 분류해 보여줍니다:
@@ -190,6 +204,9 @@ Not portable:
 - ✅ 자격증명 인벤토리 — 마이그레이션된 각 MCP 서버에 필요한 env 변수를 리포트 (0.2.0)
 - ✅ 멀티라인 TOML `args`/`env` 파싱 (0.2.0)
 - ✅ 글로벌 `convert --global` (allowlist 전용) — 홈 레벨 설정 (0.3.0)
+- ✅ `.agents/skills` 커버리지 + HTTP MCP `url` 변환 (0.4.0)
+- ✅ `audit` — Claude 표면을 자동/수동/불가로 분류 (0.5.0)
+- ✅ `convert --compile` — CLAUDE.md 계층(`.claude/rules`, `@` include)을 AGENTS.md로 합성 (0.6.0)
 - `handoff` — 다음 에이전트를 위한 간결한 프로젝트 컨텍스트 요약 내보내기 (raw 채팅 아님)
 - Gemini CLI, Cursor용 어댑터
 - Codex TOML을 쓸 때 주석과 알 수 없는 필드 보존

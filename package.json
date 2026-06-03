@@ -1,6 +1,6 @@
 {
   "name": "@seungchan.m/ai-switch",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Switch project instructions, MCP settings, and skills between AI coding agents.",
   "type": "module",
   "repository": {
