@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "docs": {
+      "command": "node",
+      "args": [
+        "scripts/docs-mcp.js"
+      ],
+      "env": {
+        "DOCS_MODE": "local"
+      }
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/sse"
+    }
+  }
+}

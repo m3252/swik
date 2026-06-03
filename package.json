@@ -1,0 +1,34 @@
+{
+  "name": "@seungchan/ai-switch",
+  "version": "0.1.0",
+  "description": "Switch project instructions, MCP settings, and skills between AI coding agents.",
+  "type": "module",
+  "bin": {
+    "ai-switch": "./src/cli.js"
+  },
+  "files": [
+    "docs",
+    "examples",
+    "src",
+    "CONTRIBUTING.md",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "start": "node ./src/cli.js",
+    "dev": "node ./src/cli.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "codex",
+    "claude-code",
+    "mcp",
+    "ai-agent",
+    "migration"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

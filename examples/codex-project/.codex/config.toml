@@ -1,0 +1,7 @@
+[mcp_servers."docs"]
+command = "node"
+args = ["scripts/docs-mcp.js"]
+env = { "DOCS_MODE" = "local" }
+
+[mcp_servers."remote"]
+url = "https://example.com/sse"
