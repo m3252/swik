@@ -27,7 +27,7 @@ The one thing that makes switching painful is having to **rebuild your setup by 
 | --- | --- | --- |
 | Instructions | `CLAUDE.md` | `AGENTS.md` |
 | MCP servers | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` |
-| Skills | `.claude/skills/` | `.codex/skills/` |
+| Skills | `.claude/skills/` | `.agents/skills/` (+ `.codex/skills/`) |
 
 **Out of scope (by design):** accounts, sessions, remote chat history, API keys/secrets.
 
@@ -104,13 +104,12 @@ node src/cli.js convert cc codex --dry-run --cwd examples/claude-project
 
 ```text
 create        AGENTS.md
-manual-review mcp: linear (HTTP server — only stdio command/args/env are auto-converted)
 create        .codex/config.toml
-copy          .claude/skills -> .codex/skills
+copy          .claude/skills -> .agents/skills
 report        ai-switch-report.md
 ```
 
-The example deliberately includes one stdio MCP server (auto-migrated) and one HTTP MCP server (flagged for manual review), so you can see both paths.
+The example includes a stdio MCP server and an HTTP MCP server — both auto-migrated (stdio → `command`, HTTP → `url`). Because one env value is a literal, the CLI also prints a warning that the local backup will preserve it.
 
 ## Safety model
 
@@ -131,7 +130,7 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 | --- | --- | --- |
 | Project instructions | ✅ | ✅ |
 | Stdio MCP servers | ✅ | ✅ |
-| HTTP/SSE MCP servers | 📝 manual review | 📝 manual review |
+| HTTP MCP servers (`url`) | ✅ url (auth manual) | ✅ url (auth manual) |
 | Local skills | ✅ copied | ✅ copied |
 | Duplicate MCP names | ⏭️ skipped | — |
 | Account / session data | ❌ | ❌ |
@@ -143,27 +142,26 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 **Claude Code → Codex**
 - `CLAUDE.md` → `AGENTS.md`
 - `.claude/settings.json#mcpServers` or `.mcp.json#mcpServers` → `.codex/config.toml`
-- HTTP/SSE servers without a stdio `command` → reported for manual review
+- stdio servers → `command`/`args`/`env`; HTTP servers (`type: http`, `url`) → a Codex `url` server (auth headers flagged for manual setup)
 - MCP names already in `.codex/config.toml` → skipped (no duplicate TOML sections)
-- `.claude/skills` → `.codex/skills`
+- `.claude/skills` → `.agents/skills` (Codex's current skill location)
 
 **Codex → Claude Code**
 - `AGENTS.md` → `CLAUDE.md`
-- `.codex/config.toml` MCP sections → `.mcp.json`
-- Codex sections without a stdio `command` → reported for manual review
-- `.codex/skills` → `.claude/skills`
+- `.codex/config.toml` MCP sections → `.mcp.json`; stdio → `command`/`args`/`env`, `url` servers → `{ "type": "http", "url" }` (bearer/header auth flagged for manual setup)
+- `.codex/skills` **and** `.agents/skills` → `.claude/skills`
 
 ## Credentials
 
 MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** between tools or into the report. After a migration, `ai-switch-report.md` lists every credential the migrated servers need, so you can set the same environment variables for the new tool. In the migrated config, any literal value is **rewritten as a `$NAME` reference** — the value itself is never copied into the target config or report — and listed there so you can set it in your environment and rotate it if it was a secret.
 
-> **Backups vs. secrets.** Backups preserve your **original** allowlisted files so `restore` can revert exactly. If your *source* config already contains literal secrets, the local backup (project: `.ai-switch-backups/`, global: `~/.ai-switch/backups/global/`; both gitignored) may contain them too — the report and CLI warn you when this happens. The guarantee is that ai-switch never writes a literal value into the *other tool's* config or the report.
+> **Backups vs. secrets.** Backups preserve your **original** allowlisted files so `restore` can revert exactly. If your *source* config already contains literal secrets, the local backup (project: `.ai-switch-backups/`, global: `~/.ai-switch/backups/global/`; both gitignored) may contain them too. The report always notes this, and the CLI additionally warns when literal **env values** are present (HTTP auth headers are flagged separately for manual setup). The guarantee is that ai-switch never writes a literal value into the *other tool's* config or the report.
 
 > ai-switch migrates **durable agent instructions and MCP wiring** — not raw chat history, private sessions, or secret values.
 
 ## Limitations
 
-- Automatic MCP conversion covers stdio servers (`command`, `args`, `env`); remote HTTP/SSE servers are listed in `ai-switch-report.md` for manual review.
+- Automatic MCP conversion covers stdio servers (`command`, `args`, `env`) and HTTP servers (`url`); auth headers/bearer tokens on HTTP servers are flagged in `ai-switch-report.md` for manual setup, not copied.
 - **Raw chat history and private sessions are never migrated** — they may contain code, secrets, and personal data, and don't translate across tools. A `handoff` summary export is planned instead.
 - Global `--global` convert is allowlist-only and never touches auth/session/state/log/cache files; broadening the allowlist is intentionally conservative.
 

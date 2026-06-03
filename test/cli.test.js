@@ -104,7 +104,7 @@ test("plans Claude to Codex instruction, MCP, skills, and report", () => {
   assert.deepEqual(changes.map((change) => path.relative(dir, change.path)), [
     "AGENTS.md",
     ".codex/config.toml",
-    ".codex/skills",
+    ".agents/skills",
     "ai-switch-report.md"
   ]);
   assert.match(changes[1].content, /\[mcp_servers\."local"\]/);
@@ -444,11 +444,12 @@ test("labels existing copy-dir plans as merge", () => {
   });
 });
 
-test("reports unsupported Claude HTTP MCP servers instead of writing empty Codex sections", () => {
+test("converts Claude HTTP MCP servers to Codex url servers, flagging auth headers", () => {
   const dir = fixture();
   writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
     mcpServers: {
       linear: { type: "http", url: "https://mcp.linear.app/sse" },
+      authed: { type: "http", url: "https://api.example.com/mcp", headers: { Authorization: "Bearer x" } },
       local: { command: "node", args: ["server.js"] }
     }
   }));
@@ -458,8 +459,12 @@ test("reports unsupported Claude HTTP MCP servers instead of writing empty Codex
   const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
 
   assert.match(codexConfig.content, /\[mcp_servers\."local"\]/);
-  assert.doesNotMatch(codexConfig.content, /\[mcp_servers\."linear"\]/);
-  assert.match(report.content, /Claude MCP server "linear" needs manual migration/);
+  assert.match(codexConfig.content, /\[mcp_servers\."linear"\]/);
+  assert.match(codexConfig.content, /url = "https:\/\/mcp\.linear\.app\/sse"/);
+  assert.match(codexConfig.content, /url = "https:\/\/api\.example\.com\/mcp"/);
+  // a plain http server migrates cleanly; one with auth headers is flagged for manual setup
+  assert.doesNotMatch(report.content, /"linear" is an HTTP server/);
+  assert.match(report.content, /"authed" is an HTTP server; its URL was migrated, but auth headers need manual setup/);
 });
 
 test("reports local absolute paths in Claude MCP settings", () => {
@@ -539,15 +544,28 @@ args = ["server.js"]
 `);
 
   assert.deepEqual(analyzeCodexMcp(dir).servers, {
+    remote: { url: "https://example.com/sse" },
     stdio: { command: "node", args: ["server.js"], env: undefined }
   });
 
   const changes = planCodexToCc(dir);
   const mcpJson = JSON.parse(changes.find((change) => change.path?.endsWith(".mcp.json")).content);
-  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
 
-  assert.equal(mcpJson.mcpServers.remote, undefined);
-  assert.match(report.content, /Codex MCP server "remote" was not converted/);
+  // url servers now convert to Claude HTTP servers
+  assert.deepEqual(mcpJson.mcpServers.remote, { type: "http", url: "https://example.com/sse" });
+  assert.equal(mcpJson.mcpServers.stdio.command, "node");
+});
+
+test("reports Codex MCP sections with neither command nor url", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".codex"), { recursive: true });
+  writeFileSync(path.join(dir, ".codex", "config.toml"), `
+[mcp_servers."broken"]
+enabled = true
+`);
+
+  const report = planCodexToCc(dir).find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+  assert.match(report, /Codex MCP server "broken" was not converted because it has no stdio command or url/);
 });
 
 test("does not stack migration instruction headers", () => {
@@ -574,7 +592,7 @@ test("global cc->codex migrates allowlisted files and references secret env", ()
   assert.match(config, /"LINEAR_API_KEY" = "\$LINEAR_API_KEY"/);
   assert.doesNotMatch(config, /lin_SECRET/);
   assert.ok(changes.some((c) => c.path?.endsWith(".codex/AGENTS.md")));
-  assert.ok(changes.some((c) => c.kind === "copy-dir" && c.path?.endsWith(".codex/skills")));
+  assert.ok(changes.some((c) => c.kind === "copy-dir" && c.path?.endsWith(".agents/skills")));
 });
 
 test("global codex->cc merges into settings.json preserving other keys", async () => {
@@ -626,4 +644,73 @@ test("literalEnvNamesInConfigs flags literal env in existing target config, not 
   writeFileSync(path.join(dir, "config.toml"), '[mcp_servers.legacy]\ncommand = "old"\nenv = { "OLD_TOKEN" = "tok_REAL", "REF" = "$REF" }\n');
   const names = literalEnvNamesInConfigs([{ path: path.join(dir, "config.toml"), format: "toml" }]);
   assert.deepEqual(names, ["OLD_TOKEN"]);
+});
+
+test("codex->cc reads skills from .agents/skills (newer location), not just .codex/skills", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".agents", "skills", "fmt"), { recursive: true });
+  writeFileSync(path.join(dir, ".agents", "skills", "fmt", "SKILL.md"), "x\n");
+
+  const changes = planCodexToCc(dir);
+  assert.ok(changes.some((c) =>
+    c.kind === "copy-dir" && c.from.endsWith(".agents/skills") && c.path.endsWith(".claude/skills")));
+});
+
+test("cc->codex writes skills to .agents/skills (preferred Codex location)", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "skills", "review"), { recursive: true });
+  writeFileSync(path.join(dir, ".claude", "skills", "review", "SKILL.md"), "x\n");
+
+  const changes = planCcToCodex(dir);
+  assert.ok(changes.some((c) =>
+    c.kind === "copy-dir" && c.from.endsWith(".claude/skills") && c.path.endsWith(".agents/skills")));
+  assert.ok(!changes.some((c) => c.path?.endsWith(".codex/skills")));
+});
+
+test("HTTP MCP round-trips: cc http url -> codex url -> cc http", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
+    mcpServers: { gw: { type: "http", url: "https://x.example/mcp" } }
+  }));
+  const codexConfig = planCcToCodex(dir).find((c) => c.path?.endsWith(".codex/config.toml")).content;
+  assert.match(codexConfig, /\[mcp_servers\."gw"\]/);
+  assert.match(codexConfig, /url = "https:\/\/x\.example\/mcp"/);
+
+  const dir2 = fixture();
+  mkdirSync(path.join(dir2, ".codex"), { recursive: true });
+  writeFileSync(path.join(dir2, ".codex", "config.toml"), codexConfig);
+  const mcpJson = JSON.parse(planCodexToCc(dir2).find((c) => c.path?.endsWith(".mcp.json")).content);
+  assert.deepEqual(mcpJson.mcpServers.gw, { type: "http", url: "https://x.example/mcp" });
+});
+
+test("restore cleanly removes merged .claude/skills (two source skill dirs)", async () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".codex", "skills", "a"), { recursive: true });
+  mkdirSync(path.join(dir, ".agents", "skills", "b"), { recursive: true });
+  writeFileSync(path.join(dir, "AGENTS.md"), "a\n");
+  writeFileSync(path.join(dir, ".codex", "skills", "a", "SKILL.md"), "a\n");
+  writeFileSync(path.join(dir, ".agents", "skills", "b", "SKILL.md"), "b\n");
+
+  await convert("codex", "cc", { cwd: dir, yes: true });
+  assert.ok(existsSync(path.join(dir, ".claude", "skills", "a")));
+  assert.ok(existsSync(path.join(dir, ".claude", "skills", "b")));
+
+  // restore must not mistake the merge for a user edit (no --force needed)
+  await restoreBackup(dir, "latest");
+  assert.equal(existsSync(path.join(dir, ".claude", "skills")), false);
+});
+
+test("project backup includes .agents so cc->codex --force is recoverable", async () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "skills", "new"), { recursive: true });
+  mkdirSync(path.join(dir, ".agents", "skills", "orig"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "p\n");
+  writeFileSync(path.join(dir, ".claude", "skills", "new", "SKILL.md"), "new\n");
+  writeFileSync(path.join(dir, ".agents", "skills", "orig", "SKILL.md"), "ORIGINAL\n");
+
+  const result = await convert("cc", "codex", { cwd: dir, yes: true, force: true });
+  assert.ok(existsSync(path.join(result.backupDir, ".agents", "skills", "orig", "SKILL.md")));
+
+  await restoreBackup(dir, "latest", { force: true });
+  assert.equal(readFileSync(path.join(dir, ".agents", "skills", "orig", "SKILL.md"), "utf8"), "ORIGINAL\n");
 });

@@ -23,6 +23,8 @@ const RELATIVE_PATHS = {
   codexDir: ".codex",
   codexConfig: path.join(".codex", "config.toml"),
   codexSkills: path.join(".codex", "skills"),
+  agentsDir: ".agents",
+  agentsSkills: path.join(".agents", "skills"),
   report: "ai-switch-report.md",
   backupDir: ".ai-switch-backups"
 };
@@ -50,6 +52,9 @@ function globalPathsFor(home, env = process.env) {
     agentsMd: path.join(codexRoot, RELATIVE_PATHS.agentsMd),
     codexConfig: path.join(codexRoot, "config.toml"),
     codexSkills: path.join(codexRoot, "skills"),
+    // Codex's current (preferred) skill location is ~/.agents/skills, independent
+    // of CODEX_HOME; ~/.codex/skills is the deprecated-but-still-read fallback.
+    agentsSkills: path.join(home, ".agents", "skills"),
     backupDir: path.join(home, GLOBAL_RELATIVE_PATHS.backupDir),
     report: path.join(home, ".ai-switch", RELATIVE_PATHS.report)
   };
@@ -67,8 +72,25 @@ function globalAllowlist(files) {
     { key: "claude/skills", path: files.claudeSkills, dir: true },
     { key: "codex/AGENTS.md", path: files.agentsMd, dir: false },
     { key: "codex/config.toml", path: files.codexConfig, dir: false },
-    { key: "codex/skills", path: files.codexSkills, dir: true }
+    { key: "codex/skills", path: files.codexSkills, dir: true },
+    { key: "agents/skills", path: files.agentsSkills, dir: true }
   ];
+}
+
+// Codex reads skills from both .codex/skills and the newer .agents/skills
+// (project), and ~/.codex/skills (deprecated) and ~/.agents/skills (preferred,
+// global). When migrating into Claude we read every existing source; when
+// writing into Codex we target the preferred .agents/skills location.
+function codexSkillSources(files) {
+  return [files.codexSkills, files.agentsSkills];
+}
+
+function skillCopyChanges(sources, target) {
+  return sources.filter((source) => existsSync(source)).map((source) => ({ kind: "copy-dir", from: source, path: target }));
+}
+
+function countSkillDirs(dirs) {
+  return dirs.reduce((total, dir) => total + listDir(dir).length, 0);
 }
 
 function usage() {
@@ -171,8 +193,8 @@ function detect(cwd) {
     codex: {
       instructionFile: existsSync(files.agentsMd) ? files.agentsMd : null,
       configFile: existsSync(files.codexConfig) ? files.codexConfig : null,
-      skillsDir: existsSync(files.codexSkills) ? files.codexSkills : null,
-      skillCount: listDir(files.codexSkills).length,
+      skillsDir: existsSync(files.agentsSkills) ? files.agentsSkills : (existsSync(files.codexSkills) ? files.codexSkills : null),
+      skillCount: countSkillDirs(codexSkillSources(files)),
       mcpServerCount: countCodexMcpServers(readText(files.codexConfig))
     },
     parseErrors: [
@@ -198,8 +220,8 @@ function detectGlobal(home = homedir(), env = process.env) {
     codex: {
       instructionFile: existsSync(files.agentsMd) ? files.agentsMd : null,
       configFile: existsSync(files.codexConfig) ? files.codexConfig : null,
-      skillsDir: existsSync(files.codexSkills) ? files.codexSkills : null,
-      skillCount: listDir(files.codexSkills).length,
+      skillsDir: existsSync(files.agentsSkills) ? files.agentsSkills : (existsSync(files.codexSkills) ? files.codexSkills : null),
+      skillCount: countSkillDirs(codexSkillSources(files)),
       mcpServerCount: countCodexMcpServers(codexConfig)
     },
     parseErrors: [
@@ -282,16 +304,19 @@ function analyzeCodexMcpFromToml(toml) {
     const segs = parseTomlHeaderPath(header[1]);
     if (segs[0] !== "mcp_servers" || segs.length < 2) continue;
     const name = segs[1];
-    if (!raw.has(name)) { raw.set(name, { command: undefined, args: undefined, env: undefined, unsupported: [] }); order.push(name); }
+    if (!raw.has(name)) { raw.set(name, { command: undefined, args: undefined, env: undefined, url: undefined, hasAuth: false, unsupported: [] }); order.push(name); }
     const entry = raw.get(name);
     const body = section.slice(header[0].length);
     if (segs.length === 2) {
       entry.command = parseTomlValue(extractTomlRawValue(section, "command"));
       entry.args = parseTomlValue(extractTomlRawValue(section, "args"));
+      entry.url = parseTomlValue(extractTomlRawValue(section, "url"));
       const inlineEnv = parseTomlValue(extractTomlRawValue(section, "env"));
       if (inlineEnv) entry.env = { ...(entry.env ?? {}), ...inlineEnv };
+      const handled = ["command", "args", "env", "url", "bearer_token_env_var", "http_headers", "env_http_headers"];
       for (const field of [...body.matchAll(/^([A-Za-z0-9_-]+)[ \t]*=/gm)].map((match) => match[1])) {
-        if (!["command", "args", "env"].includes(field) && !entry.unsupported.includes(field)) entry.unsupported.push(field);
+        if (["bearer_token_env_var", "http_headers", "env_http_headers"].includes(field)) entry.hasAuth = true;
+        if (!handled.includes(field) && !entry.unsupported.includes(field)) entry.unsupported.push(field);
       }
     } else if (segs.length === 3 && segs[2] === "env") {
       entry.env = { ...(entry.env ?? {}), ...parseTomlKeyValueBlock(body) };
@@ -302,18 +327,29 @@ function analyzeCodexMcpFromToml(toml) {
 
   for (const name of order) {
     const entry = raw.get(name);
-    const server = { command: entry.command, args: entry.args, env: entry.env };
-    if (!entry.command) {
-      manualReviews.push(`Codex MCP server "${name}" was not converted because it has no stdio command.`);
-      planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: "Codex MCP section has no stdio command." });
-      continue;
-    }
-    if (entry.unsupported.length > 0) {
+    const flagUnsupported = () => {
+      if (entry.unsupported.length === 0) return;
       manualReviews.push(`Codex MCP server "${name}" has unsupported fields not migrated: ${entry.unsupported.join(", ")}.`);
       planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: `Unsupported fields not migrated: ${entry.unsupported.join(", ")}.` });
+    };
+    if (entry.command) {
+      const server = { command: entry.command, args: entry.args, env: entry.env };
+      flagUnsupported();
+      addAbsolutePathReviews({ name, server, manualReviews, planItems });
+      servers[name] = server;
+      continue;
     }
-    addAbsolutePathReviews({ name, server, manualReviews, planItems });
-    servers[name] = server;
+    if (typeof entry.url === "string") {
+      if (entry.hasAuth) {
+        manualReviews.push(`Codex MCP server "${name}" is an HTTP server; its URL was migrated, but auth (bearer_token_env_var / http_headers) needs manual setup in Claude.`);
+        planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: "HTTP server URL migrated; auth needs manual setup." });
+      }
+      flagUnsupported();
+      servers[name] = { url: entry.url };
+      continue;
+    }
+    manualReviews.push(`Codex MCP server "${name}" was not converted because it has no stdio command or url.`);
+    planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: "Codex MCP section has no stdio command or url." });
   }
   return { servers, manualReviews, planItems };
 }
@@ -472,16 +508,34 @@ function parseTomlKeyValueBlock(text) {
 function toCodexToml(servers) {
   return Object.entries(servers).map(([name, server]) => {
     const lines = [`[mcp_servers."${escapeToml(name)}"]`];
-    if (server.command) lines.push(`command = "${escapeToml(server.command)}"`);
-    if (Array.isArray(server.args)) lines.push(`args = ${JSON.stringify(server.args)}`);
-    if (server.env && Object.keys(server.env).length > 0) {
-      const env = Object.entries(server.env)
-        .map(([key, value]) => `"${escapeToml(key)}" = "${escapeToml(String(value))}"`)
-        .join(", ");
-      lines.push(`env = { ${env} }`);
+    if (server.url) {
+      lines.push(`url = "${escapeToml(server.url)}"`);
+    } else {
+      if (server.command) lines.push(`command = "${escapeToml(server.command)}"`);
+      if (Array.isArray(server.args)) lines.push(`args = ${JSON.stringify(server.args)}`);
+      if (server.env && Object.keys(server.env).length > 0) {
+        const env = Object.entries(server.env)
+          .map(([key, value]) => `"${escapeToml(key)}" = "${escapeToml(String(value))}"`)
+          .join(", ");
+        lines.push(`env = { ${env} }`);
+      }
     }
     return `${lines.join("\n")}\n`;
   }).join("\n");
+}
+
+// Shape a normalized server map into Claude's .mcp.json / settings.json form:
+// HTTP servers become { type: "http", url }, stdio servers keep command/args/env
+// with literal env values rewritten to $NAME references.
+function toClaudeMcpServers(servers) {
+  return Object.fromEntries(Object.entries(servers).map(([name, def]) => {
+    if (def?.url) return [name, { type: "http", url: def.url }];
+    const out = {};
+    if (def?.command !== undefined) out.command = def.command;
+    if (def?.args !== undefined) out.args = def.args;
+    if (def?.env) out.env = referenceEnv(def.env);
+    return [name, out];
+  }));
 }
 
 function analyzeClaudeMcp(servers, existingCodexNames = new Set()) {
@@ -498,31 +552,40 @@ function analyzeClaudeMcp(servers, existingCodexNames = new Set()) {
       });
       continue;
     }
-    if (!server?.command) {
-      const fields = server && typeof server === "object" ? Object.keys(server).join(", ") : "non-object value";
-      manualReviews.push(`Claude MCP server "${name}" needs manual migration; only stdio command/args/env servers are converted automatically. Found fields: ${fields}.`);
-      planItems.push({
-        kind: "manual-review",
-        label: `mcp: ${name}`,
-        reason: `Only stdio command/args/env servers are converted automatically. Found fields: ${fields}.`
-      });
+    if (server?.command) {
+      const unsupportedFields = Object.keys(server).filter((field) => !["command", "args", "env"].includes(field));
+      if (unsupportedFields.length > 0) {
+        manualReviews.push(`Claude MCP server "${name}" has unsupported fields not migrated: ${unsupportedFields.join(", ")}.`);
+        planItems.push({
+          kind: "manual-review",
+          label: `mcp: ${name}`,
+          reason: `Unsupported fields not migrated: ${unsupportedFields.join(", ")}.`
+        });
+      }
+      addAbsolutePathReviews({ name, server, manualReviews, planItems });
+      supported[name] = { command: server.command, args: server.args, env: server.env };
       continue;
     }
-    const unsupportedFields = Object.keys(server).filter((field) => !["command", "args", "env"].includes(field));
-    if (unsupportedFields.length > 0) {
-      manualReviews.push(`Claude MCP server "${name}" has unsupported fields not migrated: ${unsupportedFields.join(", ")}.`);
-      planItems.push({
-        kind: "manual-review",
-        label: `mcp: ${name}`,
-        reason: `Unsupported fields not migrated: ${unsupportedFields.join(", ")}.`
-      });
+    if (typeof server?.url === "string") {
+      const hasAuth = server.headers || Object.keys(server).some((field) => !["type", "url"].includes(field));
+      if (hasAuth) {
+        manualReviews.push(`Claude MCP server "${name}" is an HTTP server; its URL was migrated, but auth headers need manual setup in Codex (bearer_token_env_var / http_headers).`);
+        planItems.push({
+          kind: "manual-review",
+          label: `mcp: ${name}`,
+          reason: "HTTP server URL migrated; auth headers need manual setup."
+        });
+      }
+      supported[name] = { url: server.url };
+      continue;
     }
-    addAbsolutePathReviews({ name, server, manualReviews, planItems });
-    supported[name] = {
-      command: server.command,
-      args: server.args,
-      env: server.env
-    };
+    const fields = server && typeof server === "object" ? Object.keys(server).join(", ") : "non-object value";
+    manualReviews.push(`Claude MCP server "${name}" needs manual migration; only stdio (command/args/env) or HTTP (url) servers are converted automatically. Found fields: ${fields}.`);
+    planItems.push({
+      kind: "manual-review",
+      label: `mcp: ${name}`,
+      reason: `Only stdio (command) or HTTP (url) servers are converted automatically. Found fields: ${fields}.`
+    });
   }
   return { supported, manualReviews, planItems };
 }
@@ -568,7 +631,7 @@ async function makeBackup(cwd, changes = []) {
   await mkdir(backupDir, { recursive: true });
   const backedUp = [];
   const planned = fileChanges(changes).map((change) => path.relative(cwd, change.path));
-  for (const relative of [RELATIVE_PATHS.claudeMd, RELATIVE_PATHS.agentsMd, RELATIVE_PATHS.mcpJson, RELATIVE_PATHS.claudeDir, RELATIVE_PATHS.codexDir, RELATIVE_PATHS.report]) {
+  for (const relative of [RELATIVE_PATHS.claudeMd, RELATIVE_PATHS.agentsMd, RELATIVE_PATHS.mcpJson, RELATIVE_PATHS.claudeDir, RELATIVE_PATHS.codexDir, RELATIVE_PATHS.agentsDir, RELATIVE_PATHS.report]) {
     const source = path.join(cwd, relative);
     if (!existsSync(source)) continue;
     const target = path.join(backupDir, relative);
@@ -592,6 +655,21 @@ function expectedHashForChange(change) {
   if (change.kind === "write") return hashText(change.content);
   if (change.kind === "copy-dir") return hashPath(change.from);
   return undefined;
+}
+
+// After changes are applied, recompute every migration-created hash from the
+// actual files on disk. The pre-apply estimate is wrong when several changes
+// merge into one target (e.g. .codex/skills + .agents/skills -> .claude/skills),
+// which would otherwise make `restore` think its own output was user-edited.
+async function refreshCreatedHashes(backupDir, resolve) {
+  const manifestPath = path.join(backupDir, ".ai-switch-manifest.json");
+  const manifest = readJson(manifestPath);
+  if (!manifest || manifest.__parseError || !manifest.created) return;
+  for (const key of Object.keys(manifest.created)) {
+    const target = resolve(key);
+    if (existsSync(target)) manifest.created[key] = hashPath(target);
+  }
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function hashText(value) {
@@ -746,6 +824,7 @@ async function convert(fromRaw, toRaw, options) {
     if (change.kind === "copy-dir") await copyTree(change.from, change.path);
     else await writeFile(change.path, change.content, "utf8");
   }
+  await refreshCreatedHashes(backupDir, (relative) => path.join(options.cwd, relative));
   return { backupDir, changes };
 }
 
@@ -784,7 +863,7 @@ function planCcToCodexGlobal(home, env = process.env) {
     }
   }
 
-  if (existsSync(files.claudeSkills)) changes.push({ kind: "copy-dir", from: files.claudeSkills, path: files.codexSkills });
+  if (existsSync(files.claudeSkills)) changes.push({ kind: "copy-dir", from: files.claudeSkills, path: files.agentsSkills });
 
   changes.push(reportChange(home, files.report, "cc", "codex", changes, manualReviews, credentials));
   return changes;
@@ -812,7 +891,7 @@ function planCodexToCcGlobal(home, env = process.env) {
       const base = existing && typeof existing === "object" ? existing : {};
       const existingMcp = base.mcpServers && typeof base.mcpServers === "object" ? base.mcpServers : {};
       const mergedMcp = { ...existingMcp };
-      for (const [name, def] of Object.entries(withReferencedEnv(incoming))) {
+      for (const [name, def] of Object.entries(toClaudeMcpServers(incoming))) {
         if (Object.hasOwn(existingMcp, name)) {
           manualReviews.push(`Claude MCP server "${name}" was skipped because ~/.claude/settings.json already has a server with that name.`);
           changes.push({ kind: "skip", label: `mcp: ${name}`, reason: "Claude global settings already has a server with that name." });
@@ -826,7 +905,7 @@ function planCodexToCcGlobal(home, env = process.env) {
     }
   }
 
-  if (existsSync(files.codexSkills)) changes.push({ kind: "copy-dir", from: files.codexSkills, path: files.claudeSkills });
+  changes.push(...skillCopyChanges(codexSkillSources(files), files.claudeSkills));
 
   changes.push(reportChange(home, files.report, "codex", "cc", changes, manualReviews, credentials));
   return changes;
@@ -857,6 +936,8 @@ async function convertGlobal(fromRaw, toRaw, options) {
     if (change.kind === "copy-dir") await copyTree(change.from, change.path);
     else await writeFile(change.path, change.content, "utf8");
   }
+  // Global manifest keys created paths by absolute path.
+  await refreshCreatedHashes(backupDir, (key) => key);
   return { backupDir, changes };
 }
 
@@ -1006,9 +1087,8 @@ function planCcToCodex(cwd) {
     }
   }
 
-  const claudeSkills = files.claudeSkills;
-  if (existsSync(claudeSkills)) {
-    changes.push({ kind: "copy-dir", from: claudeSkills, path: files.codexSkills });
+  if (existsSync(files.claudeSkills)) {
+    changes.push({ kind: "copy-dir", from: files.claudeSkills, path: files.agentsSkills });
   }
 
   changes.push(reportChange(cwd, files.report, "cc", "codex", changes, manualReviews, credentials));
@@ -1037,14 +1117,11 @@ function planCodexToCc(cwd) {
     changes.push({
       kind: "write",
       path: files.mcpJson,
-      content: `${JSON.stringify({ mcpServers: withReferencedEnv(mcp) }, null, 2)}\n`
+      content: `${JSON.stringify({ mcpServers: toClaudeMcpServers(mcp) }, null, 2)}\n`
     });
   }
 
-  const codexSkills = files.codexSkills;
-  if (existsSync(codexSkills)) {
-    changes.push({ kind: "copy-dir", from: codexSkills, path: files.claudeSkills });
-  }
+  changes.push(...skillCopyChanges(codexSkillSources(files), files.claudeSkills));
 
   changes.push(reportChange(cwd, files.report, "codex", "cc", changes, manualReviews, credentials));
   return changes;
