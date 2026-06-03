@@ -161,6 +161,24 @@ MCP サーバーは通常シークレット（API キー、トークン）を必
 
 > ai-switch が移行するのは**永続的なエージェント指示と MCP 配線**であり、生のチャット履歴・プライベートセッション・シークレット値ではありません。
 
+## スコープ & audit
+
+ai-switch が移行するのは 3 つの面 —— **指示・MCP サーバー・スキル**です。Claude Code にはさらに多くの面（`.claude/CLAUDE.md`、`CLAUDE.local.md`、`.claude/rules`、`.claude/agents`、`.claude/commands`、settings の `hooks`/`permissions`/…）があり、Codex と 1 対 1 にきれいに対応しません。そう見せかける代わりに、`ai-switch audit` が見つけたすべてを分類して表示します：
+
+```text
+Migrated automatically:
+  ✓ CLAUDE.md — root instructions → AGENTS.md
+  ✓ MCP servers — 2 server(s) (stdio/http) → .codex/config.toml
+  ✓ .claude/skills — → .agents/skills
+Needs manual migration:
+  ! .claude/agents — 1 custom agent(s) use tools/model/hooks; rebuild in Codex manually
+  ! .claude/settings.json — non-MCP keys not migrated: hooks, permissions
+Not portable:
+  ✗ .claude/output-styles — no Codex equivalent
+```
+
+すべての移行レポートにも **"Other Claude surfaces detected"** セクション（未移行のギャップ）が含まれ、変換が実際には未完了なのに完了したように見えないようにします。`doctor` はギャップがあるとき `audit` を案内します。
+
 ## 制限事項
 
 - 自動 MCP 変換は stdio サーバー（`command`、`args`、`env`）と HTTP サーバー（`url`）に対応。HTTP サーバーの auth ヘッダー/ベアラートークンはコピーされず、`ai-switch-report.md` に手動設定項目として記載されます。

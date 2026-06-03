@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -807,4 +807,19 @@ test("codex->cc report has no Claude-surface gap section", () => {
 
   const report = planCodexToCc(dir).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
   assert.doesNotMatch(report, /Other Claude surfaces detected/);
+});
+
+test("audit follows valid symlink dirs but skips broken ones without crashing", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+  mkdirSync(path.join(dir, "real-agents", "sub"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "p\n");
+  symlinkSync(path.join(dir, "real-agents", "sub"), path.join(dir, ".claude", "agents", "shared")); // valid -> dir
+  symlinkSync("/nonexistent/target", path.join(dir, ".claude", "agents", "broken")); // broken
+
+  let surfaces;
+  assert.doesNotThrow(() => { surfaces = auditSurfaces(dir); });
+  assert.doesNotThrow(() => doctorReport(dir));
+  // the valid symlinked directory is counted (Claude loads with --follow)
+  assert.ok(surfaces.some((s) => s.surface === ".claude/agents"));
 });

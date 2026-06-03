@@ -161,6 +161,24 @@ MCP 서버는 보통 시크릿(API 키, 토큰)이 필요합니다. ai-switch는
 
 > ai-switch는 **지속적인 에이전트 인스트럭션과 MCP 배선**을 옮깁니다 — raw 채팅 기록, 비공개 세션, 시크릿 값은 옮기지 않습니다.
 
+## 범위 & audit
+
+ai-switch가 옮기는 표면은 셋 — **인스트럭션, MCP 서버, 스킬**입니다. Claude Code엔 더 많은 표면(`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, `.claude/agents`, `.claude/commands`, settings의 `hooks`/`permissions`/…)이 있고, 이들은 Codex와 1:1로 깔끔히 대응되지 않습니다. 그래서 변환된 척하는 대신, `ai-switch audit`이 발견한 모든 것을 분류해 보여줍니다:
+
+```text
+Migrated automatically:
+  ✓ CLAUDE.md — root instructions → AGENTS.md
+  ✓ MCP servers — 2 server(s) (stdio/http) → .codex/config.toml
+  ✓ .claude/skills — → .agents/skills
+Needs manual migration:
+  ! .claude/agents — 1 custom agent(s) use tools/model/hooks; rebuild in Codex manually
+  ! .claude/settings.json — non-MCP keys not migrated: hooks, permissions
+Not portable:
+  ✗ .claude/output-styles — no Codex equivalent
+```
+
+모든 마이그레이션 report에도 **"Other Claude surfaces detected"** 섹션(미변환 갭)이 포함되어, 변환이 실제로 안 끝났는데 끝난 것처럼 보이지 않게 합니다. `doctor`는 갭이 있으면 `audit`을 안내합니다.
+
 ## 제한 사항
 
 - 자동 MCP 변환은 stdio 서버(`command`, `args`, `env`)와 HTTP 서버(`url`)를 지원하며, HTTP 서버의 auth 헤더/베어러 토큰은 복사하지 않고 `ai-switch-report.md`에 수동 설정 항목으로 표시됩니다.

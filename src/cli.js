@@ -1434,7 +1434,16 @@ function auditSurfaces(cwd) {
   const countEntries = (...rel) => {
     const dir = path.join(cwd, ...rel);
     if (!existsSync(dir)) return 0;
-    return readdirSync(dir).filter((name) => name.endsWith(".md") || statSync(path.join(dir, name)).isDirectory()).length;
+    return readdirSync(dir).filter((name) => {
+      if (name.endsWith(".md")) return true;
+      // Follow symlinks (Claude Code loads with ripgrep --follow), but guard so a
+      // broken symlink is skipped instead of crashing audit/doctor with ENOENT.
+      try {
+        return statSync(path.join(dir, name)).isDirectory();
+      } catch {
+        return false;
+      }
+    }).length;
   };
 
   if (has(RELATIVE_PATHS.claudeMd)) surfaces.push({ status: "migrated", surface: "CLAUDE.md", detail: "root instructions → AGENTS.md" });
