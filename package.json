@@ -1,8 +1,16 @@
 {
-  "name": "@seungchan/ai-switch",
+  "name": "@seungchan.m/ai-switch",
   "version": "0.1.0",
   "description": "Switch project instructions, MCP settings, and skills between AI coding agents.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m3252/ai-switch.git"
+  },
+  "homepage": "https://github.com/m3252/ai-switch#readme",
+  "bugs": {
+    "url": "https://github.com/m3252/ai-switch/issues"
+  },
   "bin": {
     "ai-switch": "./src/cli.js"
   },

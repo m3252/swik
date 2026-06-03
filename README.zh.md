@@ -53,8 +53,8 @@ bun run src/cli.js convert cc codex --dry-run
 计划中的安装方式：
 
 ```sh
-npm install -g @seungchan/ai-switch
-bunx @seungchan/ai-switch
+npm install -g @seungchan.m/ai-switch
+bunx @seungchan.m/ai-switch
 brew install m3252/tap/ai-switch
 ```
 
