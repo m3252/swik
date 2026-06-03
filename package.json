@@ -12,6 +12,7 @@
     "src",
     "CONTRIBUTING.md",
     "README.md",
+    "README.*.md",
     "LICENSE",
     "SECURITY.md"
   ],
