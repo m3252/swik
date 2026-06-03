@@ -3,3 +3,11 @@ node_modules/
 .DS_Store
 .ai-switch-backups/
 ai-switch-report.md
+
+# private working notes (not for publishing)
+NOTES.md
+
+# never commit secrets / tokens
+.npmrc
+.env
+.env.*
