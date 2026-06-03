@@ -82,6 +82,7 @@ bunx @seungchan.m/ai-switch             # requires Bun
 | `detect` | Machine-readable JSON of detected files |
 | `audit` | Classify every Claude surface as migrated / manual / not-portable |
 | `doctor` | Detect problems and warnings |
+| `handoff` | Create a `CODEX-HANDOFF.md` scaffold from git state, never raw chat |
 | `convert <from> <to>` | Migrate config (`cc` ↔ `codex`). Add `--dry-run`, `--yes`, `--force` |
 | `backups` | List timestamped backups |
 | `restore latest \| <timestamp>` | Restore a backup and undo a migration |
@@ -117,9 +118,10 @@ The example includes a stdio MCP server and an HTTP MCP server — both auto-mig
 `ai-switch` is conservative by default:
 
 - 🔍 `--dry-run` prints the plan and writes nothing
-- ✋ writes require `--yes`
+- ✋ migration writes require `--yes`
 - 🛡️ existing files are **not** overwritten without `--force`
-- 💾 every write snapshots to `.ai-switch-backups/<timestamp>/`
+- 📝 `handoff` writes only `CODEX-HANDOFF.md` (or `--output`) and refuses overwrite without `--force`
+- 💾 migration writes snapshot to `.ai-switch-backups/<timestamp>/`
 - ↩️ `restore latest` undoes a migration — restoring originals and removing files it created
 - 🚫 restore refuses to delete migration-created files you've since edited (unless `--force`)
 
@@ -174,6 +176,38 @@ ai-switch convert cc codex --compile --include-local --yes   # also fold in CLAU
 - **Safe by default:** `CLAUDE.local.md` is excluded unless you pass `--include-local`; an include is only inlined if it's a repo-relative text file (`.md/.txt/.json/.yaml/.yml/.toml`) under 40KB (200KB total). Absolute/`~` paths, missing files, wrong types, and circular includes are **left in place and reported for manual review** — never silently dropped.
 - Default convert (without `--compile`) is unchanged.
 
+## Handoff scaffold (`handoff`)
+
+`ai-switch handoff` creates a standalone `CODEX-HANDOFF.md` for the next agent. It does **not** read raw chat history, sessions, or file contents. It only derives safe project state from git, then leaves structured blanks for the human context git cannot know:
+
+```sh
+ai-switch handoff
+ai-switch handoff --stdout
+ai-switch handoff --from codex --to cc
+ai-switch handoff --output docs/CODEX-HANDOFF.md
+ai-switch handoff --force
+```
+
+The optional `--from`/`--to` flags (`cc` or `codex`) annotate which direction the handoff is for; they only label the scaffold and never change what git data is collected.
+
+Auto-filled from git when available:
+
+- current branch
+- changed files from `git status`
+- diff summary from `git diff --stat`
+- recent commits from `git log --oneline`
+
+Left as blanks:
+
+- goal
+- decisions
+- open TODO
+- how to test
+- known risks
+- notes for the next agent
+
+The default output is `CODEX-HANDOFF.md` in the project root. Existing files are not overwritten unless you pass `--force`, and `AGENTS.md` is never used as a handoff target. By default, the handoff records only the project basename, not your absolute local path.
+
 ## Scope & audit
 
 ai-switch migrates three surfaces — **instructions, MCP servers, and skills**. Claude Code has more (`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, `.claude/agents`, `.claude/commands`, settings `hooks`/`permissions`/…), and those don't have clean one-to-one Codex equivalents. Rather than pretend, `ai-switch audit` lists everything it finds and classifies it:
@@ -195,7 +229,7 @@ Every migration report also includes an **"Other Claude surfaces detected"** sec
 ## Limitations
 
 - Automatic MCP conversion covers stdio servers (`command`, `args`, `env`) and HTTP servers (`url`); auth headers/bearer tokens on HTTP servers are flagged in `ai-switch-report.md` for manual setup, not copied.
-- **Raw chat history and private sessions are never migrated** — they may contain code, secrets, and personal data, and don't translate across tools. A `handoff` summary export is planned instead.
+- **Raw chat history and private sessions are never migrated** — they may contain code, secrets, and personal data, and don't translate across tools. Use `ai-switch handoff` for a safe git-derived scaffold instead.
 - Global `--global` convert is allowlist-only and never touches auth/session/state/log/cache files; broadening the allowlist is intentionally conservative.
 
 ## Roadmap
@@ -206,7 +240,7 @@ Every migration report also includes an **"Other Claude surfaces detected"** sec
 - ✅ `.agents/skills` coverage + HTTP MCP `url` conversion (0.4.0)
 - ✅ `audit` — classify Claude surfaces as migrated / manual / not-portable (0.5.0)
 - ✅ `convert --compile` — synthesize the CLAUDE.md hierarchy (`.claude/rules`, `@`-includes) into AGENTS.md (0.6.0)
-- `handoff` — export a concise project-context summary for the next agent (never raw chat history)
+- ✅ `handoff` — export a concise project-context scaffold for the next agent (never raw chat history) (0.7.0)
 - Adapters for Gemini CLI and Cursor
 - Preserve comments and unknown fields when writing Codex TOML
 - Opt-in `--include-env-values` to copy secret values, behind an explicit danger warning

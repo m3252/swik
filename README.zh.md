@@ -82,6 +82,7 @@ bunx @seungchan.m/ai-switch             # 需要 Bun
 | `detect` | 已检测文件的机器可读 JSON |
 | `audit` | 将每个 Claude 表面分类为 自动迁移/手动/不可移植 |
 | `doctor` | 检测问题与警告 |
+| `handoff` | 从 git 状态创建 `CODEX-HANDOFF.md` 脚手架，不读取原始聊天 |
 | `convert <from> <to>` | 迁移配置（`cc` ↔ `codex`），可加 `--dry-run`、`--yes`、`--force` |
 | `backups` | 列出带时间戳的备份 |
 | `restore latest \| <timestamp>` | 恢复备份并撤销迁移 |
@@ -117,9 +118,10 @@ report        ai-switch-report.md
 `ai-switch` 默认保守：
 
 - 🔍 `--dry-run` 只打印计划，不写入任何内容
-- ✋ 写入需要 `--yes`
+- ✋ 迁移写入需要 `--yes`
 - 🛡️ 没有 `--force` 时**不会**覆盖已存在的文件
-- 💾 每次写入都会快照到 `.ai-switch-backups/<timestamp>/`
+- 📝 `handoff` 只写入 `CODEX-HANDOFF.md`（或 `--output`），没有 `--force` 不会覆盖
+- 💾 迁移写入会快照到 `.ai-switch-backups/<timestamp>/`
 - ↩️ `restore latest` 撤销迁移 —— 恢复原文件并移除其创建的文件
 - 🚫 若你之后修改过迁移生成的文件，restore 在没有 `--force` 时拒绝删除它
 
@@ -175,6 +177,38 @@ ai-switch convert cc codex --compile --include-local --yes   # 同时合入 CLAU
 - **默认安全：** `CLAUDE.local.md` 只有在传入 `--include-local` 时才会包含。include 仅在它是项目内文本文件（`.md/.txt/.json/.yaml/.yml/.toml`）、单文件不超过 40KB、总量不超过 200KB 时内联。绝对路径/`~` 路径、缺失文件、错误类型和循环 include 会**保留原行并写入手动审查报告**。
 - 不使用 `--compile` 时，默认转换行为不变。
 
+## handoff 脚手架（`handoff`）
+
+`ai-switch handoff` 会为下一个智能体创建独立的 `CODEX-HANDOFF.md`。它**不读取**原始聊天记录、会话或文件内容，只从 git 推导安全的项目状态，并把 git 无法知道的人工上下文留成结构化空白：
+
+```sh
+ai-switch handoff
+ai-switch handoff --stdout
+ai-switch handoff --from codex --to cc
+ai-switch handoff --output docs/CODEX-HANDOFF.md
+ai-switch handoff --force
+```
+
+可选的 `--from`/`--to` 标志（`cc` 或 `codex`）只用于标注 handoff 方向，不会改变收集的 git 数据。
+
+git 可自动填充：
+
+- 当前分支
+- 来自 `git status` 的变更文件
+- 来自 `git diff --stat` 的 diff 摘要
+- 来自 `git log --oneline` 的最近提交
+
+保留为空白：
+
+- 目标
+- 已做决定
+- 待办事项
+- 测试方法
+- 已知风险
+- 给下一个智能体的备注
+
+默认输出为项目根目录的 `CODEX-HANDOFF.md`。已有文件不会被覆盖，除非传入 `--force`，且 `AGENTS.md` 永远不会作为 handoff 目标。默认情况下，handoff 只记录项目 basename，不记录你的绝对本地路径。
+
 ## 范围 & audit
 
 ai-switch 迁移三类表面 —— **指令、MCP 服务器、技能**。Claude Code 还有更多（`.claude/CLAUDE.md`、`CLAUDE.local.md`、`.claude/rules`、`.claude/agents`、`.claude/commands`，以及 settings 的 `hooks`/`permissions`/…），它们与 Codex 没有干净的一对一对应。与其假装，`ai-switch audit` 会列出它发现的一切并分类：
@@ -196,7 +230,7 @@ Not portable:
 ## 限制
 
 - 自动 MCP 转换覆盖 stdio 服务器（`command`、`args`、`env`）和 HTTP 服务器（`url`）；HTTP 服务器的 auth 头/bearer token 不会被复制，而是在 `ai-switch-report.md` 中列为手动设置项。
-- **原始聊天记录和私有会话绝不迁移** —— 其中可能混有代码、密钥和个人信息，且在工具间无法通用。计划改为提供 `handoff` 摘要导出。
+- **原始聊天记录和私有会话绝不迁移** —— 其中可能混有代码、密钥和个人信息，且在工具间无法通用。可改用 `ai-switch handoff` 生成安全的 git 派生脚手架。
 - 全局 `--global` convert 仅限 allowlist，绝不触碰 auth/session/state/log/cache 文件；扩展 allowlist 会刻意保持保守。
 
 ## 路线图
@@ -207,7 +241,7 @@ Not portable:
 - ✅ `.agents/skills` 覆盖 + HTTP MCP `url` 转换（0.4.0）
 - ✅ `audit` —— 将 Claude 表面分类为自动/手动/不可移植（0.5.0）
 - ✅ `convert --compile` —— 将 CLAUDE.md 层级（`.claude/rules`、`@` include）合成为 AGENTS.md（0.6.0）
-- `handoff` —— 为下一个智能体导出简洁的项目上下文摘要（而非原始聊天）
+- ✅ `handoff` —— 为下一个智能体导出简洁的项目上下文脚手架（而非原始聊天）（0.7.0）
 - 为 Gemini CLI、Cursor 提供适配器
 - 写入 Codex TOML 时保留注释与未知字段
 - 可选的 `--include-env-values`（复制密钥值，置于明确的危险警告之后）

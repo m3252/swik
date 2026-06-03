@@ -16,6 +16,7 @@ import {
   restoreGlobalBackup
 } from "./backups.js";
 import { fileChanges } from "./changes.js";
+import { createHandoff, generateHandoff } from "./handoff.js";
 import { compileInstructions } from "./instructions.js";
 import { listDir, readJson, readText } from "./io.js";
 import {
@@ -63,6 +64,7 @@ Usage:
   ai-switch status --global [--home <path>]
   ai-switch audit [--cwd <path>]
   ai-switch doctor [--cwd <path>]
+  ai-switch handoff [--cwd <path>] [--output CODEX-HANDOFF.md] [--stdout] [--force] [--from <cc|codex>] [--to <cc|codex>]
   ai-switch backup [--cwd <path>]
   ai-switch backups [--cwd <path>] [--global [--home <path>]]
   ai-switch restore <latest|timestamp> [--cwd <path>] [--force] [--global [--home <path>]]
@@ -78,6 +80,9 @@ Examples:
   ai-switch convert codex cc --yes
   ai-switch status
   ai-switch status --global
+  ai-switch handoff
+  ai-switch handoff --stdout
+  ai-switch handoff --from codex --to cc
   ai-switch convert cc codex --global --dry-run
   ai-switch convert cc codex --global --yes
   ai-switch backups --global
@@ -98,6 +103,22 @@ function parseArgs(argv) {
       const value = argv[++i];
       if (!value || value.startsWith("--")) throw new Error("--home requires a path value.");
       args.home = path.resolve(value);
+    }
+    else if (arg === "--output") {
+      const value = argv[++i];
+      if (!value || value.startsWith("--")) throw new Error("--output requires a path value.");
+      args.output = value;
+    }
+    else if (arg === "--stdout") args.stdout = true;
+    else if (arg === "--from") {
+      const value = argv[++i];
+      if (!value || value.startsWith("--")) throw new Error("--from requires a value (cc, claude, claude-code, or codex).");
+      args.handoffFrom = value;
+    }
+    else if (arg === "--to") {
+      const value = argv[++i];
+      if (!value || value.startsWith("--")) throw new Error("--to requires a value (cc, claude, claude-code, or codex).");
+      args.handoffTo = value;
     }
     else if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--yes" || arg === "-y") args.yes = true;
@@ -207,6 +228,11 @@ async function convert(fromRaw, toRaw, options) {
   }
   await refreshCreatedHashes(backupDir, (relative) => path.join(options.cwd, relative));
   return { backupDir, changes };
+}
+
+async function handoff(cwd, options = {}) {
+  if (!options.stdout) assertProjectWriteScope(cwd);
+  return createHandoff(cwd, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -743,6 +769,11 @@ async function main() {
   else if (command === "status") console.log(status(args.cwd, args));
   else if (command === "audit") console.log(formatAudit(args.cwd));
   else if (command === "doctor") doctor(args.cwd);
+  else if (command === "handoff") {
+    const result = await handoff(args.cwd, args);
+    if (args.stdout) console.log(result.content.trimEnd());
+    else console.log(`created handoff: ${result.path}`);
+  }
   else if (command === "backup") {
     assertProjectWriteScope(args.cwd);
     console.log(await makeBackup(args.cwd));
@@ -782,6 +813,14 @@ async function main() {
 
 function validateScopeOptions(command, args) {
   if (args.home && !args.global) throw new Error("--home requires --global.");
+  if (args.output && command !== "handoff") throw new Error("--output is only supported for handoff.");
+  if (args.stdout && command !== "handoff") throw new Error("--stdout is only supported for handoff.");
+  if (args.output && args.stdout) throw new Error("--output cannot be used with --stdout.");
+  for (const [flag, value] of [["--from", args.handoffFrom], ["--to", args.handoffTo]]) {
+    if (value === undefined) continue;
+    if (command !== "handoff") throw new Error(`${flag} is only supported for handoff.`);
+    if (!["cc", "claude", "claude-code", "codex"].includes(value)) throw new Error(`${flag} must be cc, claude, claude-code, or codex, got "${value}".`);
+  }
   if (args.includeLocal && !args.compile) throw new Error("--include-local requires --compile.");
   if (args.compile) {
     const [, from, to] = args._;
@@ -837,6 +876,8 @@ export {
   planCcToCodexGlobal,
   planCodexToCcGlobal,
   convertGlobal,
+  generateHandoff,
+  handoff,
   literalEnvNamesInConfigs,
   restoreBackup,
   restoreGlobalBackup,

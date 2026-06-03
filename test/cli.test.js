@@ -14,6 +14,8 @@ import {
   detectGlobal,
   doctorReport,
   extractCodexMcp,
+  generateHandoff,
+  handoff,
   listBackups,
   migrateInstruction,
   parseArgs,
@@ -30,6 +32,19 @@ import {
 
 function fixture() {
   return mkdtempSync(path.join(tmpdir(), "ai-switch-"));
+}
+
+function hasGit() {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function git(cwd, args) {
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 // Run `fn` with $HOME pointed at `home` (so os.homedir() resolves there) and
@@ -426,6 +441,12 @@ test("parses global and home options", () => {
   assert.equal(args.home, "/tmp/example-home");
 });
 
+test("parses handoff output options", () => {
+  const args = parseArgs(["handoff", "--output", "docs/HANDOFF.md", "--force"]);
+  assert.equal(args.output, "docs/HANDOFF.md");
+  assert.equal(args.force, true);
+});
+
 test("rejects unknown options", () => {
   assert.throws(
     () => parseArgs(["convert", "cc", "codex", "--frce"]),
@@ -446,6 +467,22 @@ test("rejects compile flags outside project cc->codex compile mode", () => {
   assert.throws(
     () => cli(["convert", "cc", "codex", "--global", "--compile", "--dry-run"]),
     /--compile is only supported/
+  );
+});
+
+test("rejects handoff-only options outside handoff", () => {
+  const cli = (args) => execFileSync(process.execPath, ["src/cli.js", ...args], { cwd: path.resolve("."), stdio: "pipe" });
+  assert.throws(
+    () => cli(["status", "--stdout"]),
+    /--stdout is only supported for handoff/
+  );
+  assert.throws(
+    () => cli(["status", "--output", "HANDOFF.md"]),
+    /--output is only supported for handoff/
+  );
+  assert.throws(
+    () => cli(["handoff", "--stdout", "--output", "HANDOFF.md"]),
+    /--output cannot be used with --stdout/
   );
 });
 
@@ -960,4 +997,94 @@ test("compile convert mode writes the synthesized AGENTS.md", () => {
   const agents = planCcToCodex(dir, { compile: true }).find((c) => c.path?.endsWith("AGENTS.md")).content;
   assert.match(agents, /Compiled from Claude Code/);
   assert.match(agents, /## From \.claude\/rules\/style.md/);
+});
+
+test("handoff generates a scaffold without git", () => {
+  const dir = fixture();
+  const content = generateHandoff(dir, { generatedAt: "2026-01-02T03:04:05.000Z" });
+  assert.match(content, /^# AI Handoff\n/);
+  assert.match(content, /without reading raw chat, sessions, or file contents/);
+  assert.match(content, new RegExp(`project: \`${path.basename(dir)}`));
+  assert.equal(content.includes(dir), false);
+  assert.match(content, /branch: _not available_/);
+  assert.match(content, /Git status not available/);
+  assert.match(content, /## Goal[\s\S]*_Fill in the current objective\._/);
+});
+
+test("handoff writes CODEX-HANDOFF.md and protects existing files", async () => {
+  const dir = fixture();
+  const result = await handoff(dir, { generatedAt: "2026-01-02T03:04:05.000Z" });
+  assert.equal(path.basename(result.path), "CODEX-HANDOFF.md");
+  assert.ok(existsSync(path.join(dir, "CODEX-HANDOFF.md")));
+
+  await assert.rejects(
+    () => handoff(dir, {}),
+    /Refusing to overwrite existing handoff without --force/
+  );
+  await assert.rejects(
+    () => handoff(dir, { output: "../HANDOFF.md" }),
+    /must stay inside the project directory/
+  );
+  await assert.rejects(
+    () => handoff(dir, { output: "AGENTS.md" }),
+    /Refusing to write handoff into AGENTS.md/
+  );
+
+  await handoff(dir, { force: true });
+});
+
+test("handoff refuses output through a symlinked parent directory", async () => {
+  const dir = fixture();
+  const outside = fixture();
+  symlinkSync(outside, path.join(dir, "docs"));
+
+  await assert.rejects(
+    () => handoff(dir, { output: "docs/HANDOFF.md" }),
+    /output parent resolves outside the project directory/
+  );
+  assert.equal(existsSync(path.join(outside, "HANDOFF.md")), false);
+});
+
+test("handoff fills git-derived branch, changed files, and recent commits", () => {
+  if (!hasGit()) return;
+  const dir = fixture();
+  git(dir, ["init"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test User"]);
+  writeFileSync(path.join(dir, "README.md"), "initial\n");
+  git(dir, ["add", "README.md"]);
+  git(dir, ["commit", "-m", "initial commit"]);
+  git(dir, ["checkout", "-b", "handoff-test"]);
+
+  writeFileSync(path.join(dir, "README.md"), "changed\n");
+  mkdirSync(path.join(dir, "src"), { recursive: true });
+  writeFileSync(path.join(dir, "src", "new.js"), "console.log('new');\n");
+
+  const content = generateHandoff(dir, { generatedAt: "2026-01-02T03:04:05.000Z" });
+  assert.match(content, /branch: `handoff-test`/);
+  assert.match(content, /README.md/);
+  assert.match(content, /src\/new.js/);
+  assert.match(content, /initial commit/);
+  assert.match(content, /## Diff Summary[\s\S]*README.md/);
+});
+
+test("handoff --stdout does not write a file", () => {
+  const dir = fixture();
+  const output = execFileSync(process.execPath, ["src/cli.js", "handoff", "--cwd", dir, "--stdout"], {
+    cwd: path.resolve("."),
+    encoding: "utf8"
+  });
+  assert.match(output, /^# AI Handoff\n/);
+  assert.equal(existsSync(path.join(dir, "CODEX-HANDOFF.md")), false);
+});
+
+test("handoff title is direction-agnostic; --from/--to annotate context", () => {
+  const dir = fixture();
+  const plain = generateHandoff(dir, {});
+  assert.match(plain, /^# AI Handoff\n/);
+  assert.doesNotMatch(plain, /AI Handoff \(/);
+
+  const annotated = generateHandoff(dir, { handoffFrom: "codex", handoffTo: "cc" });
+  assert.match(annotated, /- from: Codex/);
+  assert.match(annotated, /- to: Claude Code/);
 });
