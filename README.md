@@ -149,7 +149,7 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 
 ## Credentials
 
-MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** between tools or into the report. After a migration, `ai-switch-report.md` lists every credential the migrated servers need, so you can set the same environment variables for the new tool. Any literal secret found in config is flagged (redacted) so you can move it into the environment and rotate it.
+MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** between tools or into the report. After a migration, `ai-switch-report.md` lists every credential the migrated servers need, so you can set the same environment variables for the new tool. In the migrated config, any literal value is **rewritten as a `$NAME` reference** — the value itself is never copied — and listed in the report so you can set it in your environment and rotate it if it was a secret.
 
 > ai-switch migrates **durable agent instructions and MCP wiring** — not raw chat history, private sessions, or secret values.
 

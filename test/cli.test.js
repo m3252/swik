@@ -142,11 +142,45 @@ test("inventories required credentials without leaking literal secret values", (
     }
   }));
 
-  const report = planCcToCodex(dir).find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+  const changes = planCcToCodex(dir);
+  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md")).content;
   assert.match(report, /## Credentials needed/);
   assert.match(report, /LINEAR_API_KEY \(server: linear\) — referenced via env/);
-  assert.match(report, /GITHUB_TOKEN \(server: github\) — a literal value is present \(redacted\)/);
+  assert.match(report, /GITHUB_TOKEN \(server: github\) — source config had a literal value/);
   assert.doesNotMatch(report, /ghp_REALsecret123/);
+
+  // P0: the literal secret must NOT be written into the target config either.
+  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml")).content;
+  assert.doesNotMatch(codexConfig, /ghp_REALsecret123/);
+  assert.match(codexConfig, /"GITHUB_TOKEN" = "\$GITHUB_TOKEN"/);
+  assert.match(codexConfig, /"LINEAR_API_KEY" = "\$LINEAR_API_KEY"/);
+});
+
+test("merges nested [mcp_servers.x.env] tables and ignores unrelated tables", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".codex"), { recursive: true });
+  writeFileSync(path.join(dir, ".codex", "config.toml"), `
+[mcp_servers.node_repl]
+command = "node"
+args = [
+  "repl.js", # entrypoint
+  "--strict"
+]
+
+[mcp_servers.node_repl.env]
+NODE_ENV = "dev"
+
+[profiles.default]
+model = "gpt-5"
+`);
+
+  const result = analyzeCodexMcp(dir);
+  assert.deepEqual(result.servers, {
+    node_repl: { command: "node", args: ["repl.js", "--strict"], env: { NODE_ENV: "dev" } }
+  });
+  // no phantom "node_repl.env" server and no false "model" unsupported-field review
+  assert.equal(result.manualReviews.join("\n").includes("node_repl.env"), false);
+  assert.equal(result.manualReviews.join("\n").includes("model"), false);
 });
 
 test("writes migration with backup only when confirmed", async () => {

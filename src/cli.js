@@ -246,35 +246,51 @@ function analyzeCodexMcp(cwd) {
   const servers = {};
   const manualReviews = [];
   const planItems = [];
-  const sections = toml.split(/\n(?=\[mcp_servers\.)/g);
-  for (const section of sections) {
-    const header = section.match(/^\[mcp_servers\."?([^"\]\n]+)"?\]/m);
+
+  // Group TOML tables by MCP server, merging a nested [mcp_servers.<name>.env]
+  // sub-table into its parent. Splitting on every table header (not just the
+  // next mcp_servers one) keeps unrelated tables like [profiles.default] from
+  // leaking their keys into an MCP server's field list.
+  const order = [];
+  const raw = new Map();
+  for (const section of toml.split(/\n(?=\[)/g)) {
+    const header = section.match(/^\[([^\]\n]*)\]/);
     if (!header) continue;
-    const name = header[1];
-    const command = parseTomlValue(extractTomlRawValue(section, "command"));
-    const args = parseTomlValue(extractTomlRawValue(section, "args"));
-    const env = parseTomlValue(extractTomlRawValue(section, "env"));
-    const fieldNames = [...section.matchAll(/^([A-Za-z0-9_-]+)\s*=/gm)].map((match) => match[1]);
-    const unsupportedFields = fieldNames.filter((field) => !["command", "args", "env"].includes(field));
-    if (!command) {
+    const segs = parseTomlHeaderPath(header[1]);
+    if (segs[0] !== "mcp_servers" || segs.length < 2) continue;
+    const name = segs[1];
+    if (!raw.has(name)) { raw.set(name, { command: undefined, args: undefined, env: undefined, unsupported: [] }); order.push(name); }
+    const entry = raw.get(name);
+    const body = section.slice(header[0].length);
+    if (segs.length === 2) {
+      entry.command = parseTomlValue(extractTomlRawValue(section, "command"));
+      entry.args = parseTomlValue(extractTomlRawValue(section, "args"));
+      const inlineEnv = parseTomlValue(extractTomlRawValue(section, "env"));
+      if (inlineEnv) entry.env = { ...(entry.env ?? {}), ...inlineEnv };
+      for (const field of [...body.matchAll(/^([A-Za-z0-9_-]+)[ \t]*=/gm)].map((match) => match[1])) {
+        if (!["command", "args", "env"].includes(field) && !entry.unsupported.includes(field)) entry.unsupported.push(field);
+      }
+    } else if (segs.length === 3 && segs[2] === "env") {
+      entry.env = { ...(entry.env ?? {}), ...parseTomlKeyValueBlock(body) };
+    } else if (!entry.unsupported.includes(segs.slice(2).join("."))) {
+      entry.unsupported.push(segs.slice(2).join("."));
+    }
+  }
+
+  for (const name of order) {
+    const entry = raw.get(name);
+    const server = { command: entry.command, args: entry.args, env: entry.env };
+    if (!entry.command) {
       manualReviews.push(`Codex MCP server "${name}" was not converted because it has no stdio command.`);
-      planItems.push({
-        kind: "manual-review",
-        label: `mcp: ${name}`,
-        reason: "Codex MCP section has no stdio command."
-      });
+      planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: "Codex MCP section has no stdio command." });
       continue;
     }
-    if (unsupportedFields.length > 0) {
-      manualReviews.push(`Codex MCP server "${name}" has unsupported fields not migrated: ${unsupportedFields.join(", ")}.`);
-      planItems.push({
-        kind: "manual-review",
-        label: `mcp: ${name}`,
-        reason: `Unsupported fields not migrated: ${unsupportedFields.join(", ")}.`
-      });
+    if (entry.unsupported.length > 0) {
+      manualReviews.push(`Codex MCP server "${name}" has unsupported fields not migrated: ${entry.unsupported.join(", ")}.`);
+      planItems.push({ kind: "manual-review", label: `mcp: ${name}`, reason: `Unsupported fields not migrated: ${entry.unsupported.join(", ")}.` });
     }
-    addAbsolutePathReviews({ name, server: { command, args, env }, manualReviews, planItems });
-    servers[name] = { command, args, env };
+    addAbsolutePathReviews({ name, server, manualReviews, planItems });
+    servers[name] = server;
   }
   return { servers, manualReviews, planItems };
 }
@@ -290,6 +306,7 @@ function extractTomlRawValue(section, key) {
 }
 
 function readTomlValueSpan(text, start) {
+  while (start < text.length && (text[start] === " " || text[start] === "\t")) start += 1;
   const open = text[start];
   if (open === "\"" || open === "'") return text.slice(start, scanTomlString(text, start));
   if (open === "[" || open === "{") {
@@ -298,6 +315,7 @@ function readTomlValueSpan(text, start) {
     for (let i = start; i < text.length; i += 1) {
       const ch = text[i];
       if (ch === "\"" || ch === "'") { i = scanTomlString(text, i) - 1; continue; }
+      if (ch === "#") { const nl = text.indexOf("\n", i); if (nl === -1) return text.slice(start); i = nl; continue; }
       if (ch === open) depth += 1;
       else if (ch === close && (depth -= 1) === 0) return text.slice(start, i + 1);
     }
@@ -362,6 +380,7 @@ function splitTomlList(body) {
       i = end - 1;
       continue;
     }
+    if (ch === "#") { const nl = body.indexOf("\n", i); if (nl === -1) break; i = nl; continue; }
     if (ch === "[" || ch === "{") depth += 1;
     else if (ch === "]" || ch === "}") depth -= 1;
     if (ch === "," && depth === 0) { parts.push(current); current = ""; continue; }
@@ -388,6 +407,43 @@ function unquoteTomlKey(key) {
     return key.slice(1, -1);
   }
   return key;
+}
+
+// Split a dotted table header (the text between [ and ]) into key segments,
+// honoring quoted segments. `mcp_servers.node_repl.env` -> [mcp_servers, node_repl, env];
+// `mcp_servers."a.b"` -> [mcp_servers, "a.b"].
+function parseTomlHeaderPath(inner) {
+  const segs = [];
+  let i = 0;
+  while (i < inner.length) {
+    while (i < inner.length && (inner[i] === " " || inner[i] === "\t" || inner[i] === ".")) i += 1;
+    if (i >= inner.length) break;
+    if (inner[i] === "\"" || inner[i] === "'") {
+      const end = scanTomlString(inner, i);
+      segs.push(parseTomlScalar(inner.slice(i, end)));
+      i = end;
+    } else {
+      let j = i;
+      while (j < inner.length && inner[j] !== "." && inner[j] !== " " && inner[j] !== "\t") j += 1;
+      segs.push(inner.slice(i, j));
+      i = j;
+    }
+  }
+  return segs;
+}
+
+// Parse a block of `key = value` lines (the body of an [mcp_servers.x.env]
+// sub-table) into an object.
+function parseTomlKeyValueBlock(text) {
+  const out = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line[0] === "#" || line[0] === "[") continue;
+    const eq = topLevelEqualsIndex(line);
+    if (eq === -1) continue;
+    out[unquoteTomlKey(line.slice(0, eq).trim())] = parseTomlValue(readTomlValueSpan(line, eq + 1));
+  }
+  return out;
 }
 
 function toCodexToml(servers) {
@@ -712,7 +768,7 @@ function planCcToCodex(cwd) {
     changes.push(...analysis.planItems);
     if (Object.keys(analysis.supported).length > 0) {
       credentials = collectCredentials(analysis.supported);
-      const migratedBlock = `\n# Migrated from Claude MCP settings by ai-switch.\n${toCodexToml(analysis.supported)}`;
+      const migratedBlock = `\n# Migrated from Claude MCP settings by ai-switch.\n${toCodexToml(withReferencedEnv(analysis.supported))}`;
       changes.push({
         kind: "write",
         path: files.codexConfig,
@@ -752,7 +808,7 @@ function planCodexToCc(cwd) {
     changes.push({
       kind: "write",
       path: files.mcpJson,
-      content: `${JSON.stringify({ mcpServers: mcp }, null, 2)}\n`
+      content: `${JSON.stringify({ mcpServers: withReferencedEnv(mcp) }, null, 2)}\n`
     });
   }
 
@@ -834,11 +890,28 @@ function isEnvReference(value) {
   return typeof value === "string" && /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(value.trim());
 }
 
+// Never write a secret value into the target config. `$VAR` references pass
+// through unchanged; any literal value is replaced with a `$NAME` reference so
+// the wiring survives but the secret does not travel between tools.
+function referenceEnv(env) {
+  if (!env || typeof env !== "object") return env;
+  const out = {};
+  for (const [key, value] of Object.entries(env)) {
+    out[key] = isEnvReference(value) ? value : `$${key}`;
+  }
+  return out;
+}
+
+function withReferencedEnv(servers) {
+  return Object.fromEntries(Object.entries(servers).map(([name, def]) =>
+    [name, def?.env ? { ...def, env: referenceEnv(def.env) } : def]));
+}
+
 function credentialLines(credentials) {
   if (credentials.length === 0) return ["- None"];
   return credentials.map((cred) => cred.isReference
     ? `- ${cred.name} (server: ${cred.server}) — referenced via env; set the same variable for the target tool`
-    : `- ${cred.name} (server: ${cred.server}) — a literal value is present (redacted); move it to an env var and rotate it if it is a real secret`);
+    : `- ${cred.name} (server: ${cred.server}) — source config had a literal value; written as \`$${cred.name}\` reference instead (the secret was not copied). Set it in the environment and rotate if it was a real secret`);
 }
 
 function assertNoUnsafeOverwrites(changes, cwd, force = false) {
