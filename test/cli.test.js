@@ -133,6 +133,22 @@ env = { "TOKEN" = "a,b=c", "MODE" = "dev" }
   });
 });
 
+test("inventories required credentials without leaking literal secret values", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
+    mcpServers: {
+      linear: { command: "npx", args: ["-y", "linear-mcp"], env: { LINEAR_API_KEY: "$LINEAR_API_KEY" } },
+      github: { command: "docker", args: ["run", "mcp/github"], env: { GITHUB_TOKEN: "ghp_REALsecret123" } }
+    }
+  }));
+
+  const report = planCcToCodex(dir).find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+  assert.match(report, /## Credentials needed/);
+  assert.match(report, /LINEAR_API_KEY \(server: linear\) — referenced via env/);
+  assert.match(report, /GITHUB_TOKEN \(server: github\) — a literal value is present \(redacted\)/);
+  assert.doesNotMatch(report, /ghp_REALsecret123/);
+});
+
 test("writes migration with backup only when confirmed", async () => {
   const dir = fixture();
   mkdirSync(path.join(dir, ".claude"), { recursive: true });

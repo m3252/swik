@@ -147,18 +147,28 @@ report        ai-switch-report.md
 - stdio `command`가 없는 Codex 섹션 → 수동 검토로 리포트
 - `.codex/skills` → `.claude/skills`
 
+## 자격증명
+
+MCP 서버는 보통 시크릿(API 키, 토큰)이 필요합니다. ai-switch는 **배선** — 서버 이름, command, args, env 변수 *이름* — 만 옮기고, 시크릿 **값**은 도구 간에도 리포트에도 절대 복사하지 않습니다. 마이그레이션 후 `ai-switch-report.md`가 마이그레이션된 서버에 필요한 자격증명 목록을 보여주므로, 같은 환경변수만 새 도구에 설정하면 됩니다. 설정에 박혀 있던 실제 시크릿 값은 (redacted 처리되어) 표시되며, 환경변수로 옮기고 교체하도록 안내합니다.
+
+> ai-switch는 **지속적인 에이전트 인스트럭션과 MCP 배선**을 옮깁니다 — raw 채팅 기록, 비공개 세션, 시크릿 값은 옮기지 않습니다.
+
 ## 제한 사항
 
 - 자동 MCP 변환은 stdio 서버(`command`, `args`, `env`)만 지원하며, 원격 HTTP/SSE 서버는 `ai-switch-report.md`에 수동 검토 항목으로 표시됩니다.
-- TOML 파싱은 의도적으로 최소화되어 있어 현재는 단일 줄 `args`와 인라인 `env`를 가정합니다.
+- **raw 채팅 기록과 비공개 세션은 절대 옮기지 않습니다** — 코드·시크릿·개인정보가 섞여 있을 수 있고 도구 간에 의미가 통하지 않습니다. 대신 `handoff` 요약 내보내기를 계획 중입니다.
 - 글로벌(홈 레벨) 지원은 현재 **읽기 전용** — `status --global`만 가능하며 글로벌 `convert`는 아직 없습니다.
 
 ## 로드맵
 
+- ✅ 자격증명 인벤토리 — 마이그레이션된 각 MCP 서버에 필요한 env 변수를 리포트 (0.2.0)
+- ✅ 멀티라인 TOML `args`/`env` 파싱 (0.2.0)
+- 메모리: 글로벌 인스트럭션/메모리 파일(`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)을 명시적 `--global`에서 마이그레이션
+- `handoff` — 다음 에이전트를 위한 간결한 프로젝트 컨텍스트 요약 내보내기 (raw 채팅 아님)
+- 옵트인 글로벌 `convert --global` (홈 레벨 설정)
+- Gemini CLI, Cursor용 어댑터
 - Codex TOML을 쓸 때 주석과 알 수 없는 필드 보존
-- 옵트인 글로벌(`convert --global`) 지원
-- npm 배포 자동화
-- Gemini CLI, Cursor, Windsurf, Aider용 어댑터
+- 옵트인 `--include-env-values` (시크릿 값 복사, 명시적 위험 경고 뒤에)
 
 ## 기여
 

@@ -147,18 +147,28 @@ report        ai-switch-report.md
 - 没有 stdio `command` 的 Codex 段 → 报告为人工复核
 - `.codex/skills` → `.claude/skills`
 
+## 凭证
+
+MCP 服务器通常需要密钥（API key、token）。ai-switch 只迁移**接线** —— 服务器名称、command、args 以及 env 变量*名称* —— 绝不在工具之间或报告中复制密钥**值**。迁移后，`ai-switch-report.md` 会列出已迁移服务器所需的全部凭证，你只需为新工具设置相同的环境变量即可。配置中出现的任何明文密钥都会被标记（并打码），提示你把它移到环境变量并轮换。
+
+> ai-switch 迁移的是**持久的智能体指令与 MCP 接线** —— 而非原始聊天记录、私有会话或密钥值。
+
 ## 限制
 
 - 自动 MCP 转换仅覆盖 stdio 服务器（`command`、`args`、`env`）；远程 HTTP/SSE 服务器会在 `ai-switch-report.md` 中列为人工复核项。
-- TOML 解析有意保持精简，目前假定单行 `args` 和内联 `env`。
+- **原始聊天记录和私有会话绝不迁移** —— 其中可能混有代码、密钥和个人信息，且在工具间无法通用。计划改为提供 `handoff` 摘要导出。
 - 全局（主目录级）支持目前为**只读** —— 仅 `status --global`，尚无全局 `convert`。
 
 ## 路线图
 
+- ✅ 凭证清单 —— 报告每个已迁移 MCP 服务器所需的 env 变量（0.2.0）
+- ✅ 多行 TOML `args`/`env` 解析（0.2.0）
+- 记忆：在显式 `--global` 下迁移全局指令/记忆文件（`~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`）
+- `handoff` —— 为下一个智能体导出简洁的项目上下文摘要（而非原始聊天）
+- 可选启用的全局 `convert --global`（主目录级配置）
+- 为 Gemini CLI、Cursor 提供适配器
 - 写入 Codex TOML 时保留注释与未知字段
-- 可选启用的全局（`convert --global`）支持
-- npm 发布自动化
-- 为 Gemini CLI、Cursor、Windsurf、Aider 提供适配器
+- 可选的 `--include-env-values`（复制密钥值，置于明确的危险警告之后）
 
 ## 贡献
 

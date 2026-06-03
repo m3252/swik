@@ -147,18 +147,28 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 - Codex sections without a stdio `command` → reported for manual review
 - `.codex/skills` → `.claude/skills`
 
+## Credentials
+
+MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** between tools or into the report. After a migration, `ai-switch-report.md` lists every credential the migrated servers need, so you can set the same environment variables for the new tool. Any literal secret found in config is flagged (redacted) so you can move it into the environment and rotate it.
+
+> ai-switch migrates **durable agent instructions and MCP wiring** — not raw chat history, private sessions, or secret values.
+
 ## Limitations
 
 - Automatic MCP conversion covers stdio servers (`command`, `args`, `env`); remote HTTP/SSE servers are listed in `ai-switch-report.md` for manual review.
-- TOML parsing is intentionally minimal and currently expects single-line `args` and inline `env`.
+- **Raw chat history and private sessions are never migrated** — they may contain code, secrets, and personal data, and don't translate across tools. A `handoff` summary export is planned instead.
 - Global (home-level) support is **read-only** for now — `status --global` only; no global `convert` yet.
 
 ## Roadmap
 
+- ✅ Credential inventory — report the env vars each migrated MCP server needs (0.2.0)
+- ✅ Multi-line TOML `args`/`env` parsing (0.2.0)
+- Memory: migrate global instruction/memory files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) under explicit `--global`
+- `handoff` — export a concise project-context summary for the next agent (never raw chat history)
+- Opt-in global `convert --global` for home-level config
+- Adapters for Gemini CLI and Cursor
 - Preserve comments and unknown fields when writing Codex TOML
-- Opt-in global (`convert --global`) support
-- npm publish automation
-- Adapters for Gemini CLI, Cursor, Windsurf, and Aider
+- Opt-in `--include-env-values` to copy secret values, behind an explicit danger warning
 
 ## Contributing
 

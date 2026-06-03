@@ -704,12 +704,14 @@ function planCcToCodex(cwd) {
   const mcp = sourceAnalysis.servers;
   manualReviews.push(...sourceAnalysis.manualReviews);
   changes.push(...sourceAnalysis.planItems);
+  let credentials = [];
   if (Object.keys(mcp).length > 0) {
     const current = readText(files.codexConfig) ?? "";
     const analysis = analyzeClaudeMcp(mcp, codexMcpNames(current));
     manualReviews.push(...analysis.manualReviews);
     changes.push(...analysis.planItems);
     if (Object.keys(analysis.supported).length > 0) {
+      credentials = collectCredentials(analysis.supported);
       const migratedBlock = `\n# Migrated from Claude MCP settings by ai-switch.\n${toCodexToml(analysis.supported)}`;
       changes.push({
         kind: "write",
@@ -724,7 +726,7 @@ function planCcToCodex(cwd) {
     changes.push({ kind: "copy-dir", from: claudeSkills, path: files.codexSkills });
   }
 
-  changes.push(reportChange(cwd, "cc", "codex", changes, manualReviews));
+  changes.push(reportChange(cwd, "cc", "codex", changes, manualReviews, credentials));
   return changes;
 }
 
@@ -745,6 +747,7 @@ function planCodexToCc(cwd) {
   const mcp = mcpAnalysis.servers;
   manualReviews.push(...mcpAnalysis.manualReviews);
   changes.push(...mcpAnalysis.planItems);
+  const credentials = collectCredentials(mcp);
   if (Object.keys(mcp).length > 0) {
     changes.push({
       kind: "write",
@@ -758,7 +761,7 @@ function planCodexToCc(cwd) {
     changes.push({ kind: "copy-dir", from: codexSkills, path: files.claudeSkills });
   }
 
-  changes.push(reportChange(cwd, "codex", "cc", changes, manualReviews));
+  changes.push(reportChange(cwd, "codex", "cc", changes, manualReviews, credentials));
   return changes;
 }
 
@@ -775,7 +778,7 @@ function mergeCodexConfig(current, migratedBlock) {
   return `${current.trimEnd()}\n${migratedBlock}`;
 }
 
-function reportChange(cwd, from, to, changes, manualReviews = []) {
+function reportChange(cwd, from, to, changes, manualReviews = [], credentials = []) {
   const lines = [
     `# ai-switch migration report`,
     "",
@@ -791,6 +794,12 @@ function reportChange(cwd, from, to, changes, manualReviews = []) {
     "",
     ...(manualReviews.length > 0 ? manualReviews.map((item) => `- ${item}`) : ["- None"]),
     "",
+    "## Credentials needed",
+    "",
+    "ai-switch never copies secret values. Provide these in the target tool's environment before the migrated MCP servers will run:",
+    "",
+    ...credentialLines(credentials),
+    "",
     "## Notes",
     "",
     "- Secrets and account sessions are intentionally not migrated.",
@@ -801,8 +810,35 @@ function reportChange(cwd, from, to, changes, manualReviews = []) {
     kind: "write",
     path: projectPaths(cwd).report,
     content: `${lines.join("\n")}\n`,
-    manualReviews
+    manualReviews,
+    credentials
   };
+}
+
+// Inventory the env vars the migrated MCP servers depend on, without ever
+// emitting secret values. References like `$TOKEN` are safe to show; literal
+// values are flagged (redacted) so the user knows a real secret is sitting in
+// config and should be moved to the environment.
+function collectCredentials(serversMap) {
+  const credentials = [];
+  for (const [server, def] of Object.entries(serversMap)) {
+    if (!def?.env || typeof def.env !== "object") continue;
+    for (const [name, value] of Object.entries(def.env)) {
+      credentials.push({ server, name, isReference: isEnvReference(value) });
+    }
+  }
+  return credentials;
+}
+
+function isEnvReference(value) {
+  return typeof value === "string" && /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(value.trim());
+}
+
+function credentialLines(credentials) {
+  if (credentials.length === 0) return ["- None"];
+  return credentials.map((cred) => cred.isReference
+    ? `- ${cred.name} (server: ${cred.server}) — referenced via env; set the same variable for the target tool`
+    : `- ${cred.name} (server: ${cred.server}) — a literal value is present (redacted); move it to an env var and rotate it if it is a real secret`);
 }
 
 function assertNoUnsafeOverwrites(changes, cwd, force = false) {
