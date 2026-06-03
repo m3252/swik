@@ -15,7 +15,11 @@ It never touches accounts, sessions, chat history, or secrets outside your proje
 
 ## Why
 
-If you use more than one AI coding agent, you keep re-writing the same setup: instruction files, MCP servers, and skills. `ai-switch` converts them in one command and **reports anything it can't safely auto-convert** instead of silently dropping it.
+AI coding tools ship improvements almost every week. The best tool for a task today may not be the best one next month — and staying on whatever you're used to, out of habit, quietly costs you the productivity that newer tools unlock. The smart move is to use the best tool available *right now*, not the one you happened to learn first.
+
+The one thing that makes switching painful is having to **rebuild your setup by hand** — instructions, MCP servers, skills — every single time. That friction is the real lock-in.
+
+`ai-switch` removes it by making your setup portable. Convert it in one command and follow the best tool instead of the one you happened to configure: try something new this week, switch back the next, or run both across different projects. Anything it can't safely auto-convert is **reported for manual review**, never silently dropped.
 
 ## What it moves
 
