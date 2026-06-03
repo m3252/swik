@@ -110,6 +110,29 @@ env = { "TOKEN" = "abc" }
   assert.equal(readFileSync(path.join(dir, "AGENTS.md"), "utf8"), "Prefer small patches.\n");
 });
 
+test("parses multi-line Codex args and inline env with commas and equals", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".codex"), { recursive: true });
+  writeFileSync(path.join(dir, ".codex", "config.toml"), `
+[mcp_servers."multiline"]
+command = "npx"
+args = [
+  "-y",
+  "@scope/server",
+  "--flag=with,comma"
+]
+env = { "TOKEN" = "a,b=c", "MODE" = "dev" }
+`);
+
+  assert.deepEqual(extractCodexMcp(dir), {
+    multiline: {
+      command: "npx",
+      args: ["-y", "@scope/server", "--flag=with,comma"],
+      env: { TOKEN: "a,b=c", MODE: "dev" }
+    }
+  });
+});
+
 test("writes migration with backup only when confirmed", async () => {
   const dir = fixture();
   mkdirSync(path.join(dir, ".claude"), { recursive: true });

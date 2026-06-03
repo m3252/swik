@@ -251,9 +251,9 @@ function analyzeCodexMcp(cwd) {
     const header = section.match(/^\[mcp_servers\."?([^"\]\n]+)"?\]/m);
     if (!header) continue;
     const name = header[1];
-    const command = parseTomlString(section.match(/^command\s*=\s*"([^"]*)"/m)?.[1]);
-    const args = parseTomlArray(section.match(/^args\s*=\s*(\[[^\n]*\])/m)?.[1]);
-    const env = parseTomlInlineObject(section.match(/^env\s*=\s*(\{[^\n]*\})/m)?.[1]);
+    const command = parseTomlValue(extractTomlRawValue(section, "command"));
+    const args = parseTomlValue(extractTomlRawValue(section, "args"));
+    const env = parseTomlValue(extractTomlRawValue(section, "env"));
     const fieldNames = [...section.matchAll(/^([A-Za-z0-9_-]+)\s*=/gm)].map((match) => match[1]);
     const unsupportedFields = fieldNames.filter((field) => !["command", "args", "env"].includes(field));
     if (!command) {
@@ -279,32 +279,115 @@ function analyzeCodexMcp(cwd) {
   return { servers, manualReviews, planItems };
 }
 
-function parseTomlArray(value) {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value.slice(1, -1).split(",").map((part) => part.trim().replace(/^"|"$/g, "")).filter(Boolean);
-  }
+// --- Minimal dependency-free reader for the TOML value forms used by MCP
+// configs: quoted strings, arrays of strings, and inline tables. Unlike a
+// single-line regex, this handles multi-line `args`/`env` and quoted values
+// that contain commas or "=".
+function extractTomlRawValue(section, key) {
+  const match = section.match(new RegExp(`^${key}[ \\t]*=[ \\t]*`, "m"));
+  if (!match) return undefined;
+  return readTomlValueSpan(section, match.index + match[0].length);
 }
 
-function parseTomlInlineObject(value) {
-  if (!value) return undefined;
-  const body = value.slice(1, -1).trim();
-  if (!body) return {};
-  return Object.fromEntries(body.split(",").map((entry) => {
-    const [key, raw] = entry.split("=").map((part) => part.trim());
-    return [key.replace(/^"|"$/g, ""), parseTomlString(raw.replace(/^"|"$/g, ""))];
-  }));
+function readTomlValueSpan(text, start) {
+  const open = text[start];
+  if (open === "\"" || open === "'") return text.slice(start, scanTomlString(text, start));
+  if (open === "[" || open === "{") {
+    const close = open === "[" ? "]" : "}";
+    let depth = 0;
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === "\"" || ch === "'") { i = scanTomlString(text, i) - 1; continue; }
+      if (ch === open) depth += 1;
+      else if (ch === close && (depth -= 1) === 0) return text.slice(start, i + 1);
+    }
+    return text.slice(start);
+  }
+  const nl = text.indexOf("\n", start);
+  const raw = nl === -1 ? text.slice(start) : text.slice(start, nl);
+  const comment = raw.indexOf("#");
+  return (comment === -1 ? raw : raw.slice(0, comment)).trim();
 }
 
-function parseTomlString(value) {
-  if (value === undefined) return undefined;
-  try {
-    return JSON.parse(`"${value}"`);
-  } catch {
-    return value;
+// Index just past the closing quote of the string starting at `start`.
+function scanTomlString(text, start) {
+  const quote = text[start];
+  for (let i = start + 1; i < text.length; i += 1) {
+    if (quote === "\"" && text[i] === "\\") { i += 1; continue; }
+    if (text[i] === quote) return i + 1;
   }
+  return text.length;
+}
+
+function parseTomlValue(raw) {
+  if (raw === undefined) return undefined;
+  const text = raw.trim();
+  if (text === "") return undefined;
+  if (text[0] === "[") return splitTomlList(text.slice(1, -1)).map(parseTomlValue);
+  if (text[0] === "{") return parseTomlInlineTable(text.slice(1, -1));
+  return parseTomlScalar(text);
+}
+
+function parseTomlInlineTable(body) {
+  const out = {};
+  for (const pair of splitTomlList(body)) {
+    const eq = topLevelEqualsIndex(pair);
+    if (eq === -1) continue;
+    out[unquoteTomlKey(pair.slice(0, eq).trim())] = parseTomlValue(pair.slice(eq + 1).trim());
+  }
+  return out;
+}
+
+function parseTomlScalar(text) {
+  if (text[0] === "\"") {
+    try { return JSON.parse(text); } catch { return text.slice(1, -1); }
+  }
+  if (text[0] === "'") return text.slice(1, text.endsWith("'") ? -1 : text.length);
+  if (text === "true") return true;
+  if (text === "false") return false;
+  return text;
+}
+
+// Split a comma-separated TOML body at top level, respecting strings and
+// nested []/{}. Trailing commas and empty entries are dropped.
+function splitTomlList(body) {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === "\"" || ch === "'") {
+      const end = scanTomlString(body, i);
+      current += body.slice(i, end);
+      i = end - 1;
+      continue;
+    }
+    if (ch === "[" || ch === "{") depth += 1;
+    else if (ch === "]" || ch === "}") depth -= 1;
+    if (ch === "," && depth === 0) { parts.push(current); current = ""; continue; }
+    current += ch;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part !== "");
+}
+
+function topLevelEqualsIndex(pair) {
+  let depth = 0;
+  for (let i = 0; i < pair.length; i += 1) {
+    const ch = pair[i];
+    if (ch === "\"" || ch === "'") { i = scanTomlString(pair, i) - 1; continue; }
+    if (ch === "[" || ch === "{") depth += 1;
+    else if (ch === "]" || ch === "}") depth -= 1;
+    else if (ch === "=" && depth === 0) return i;
+  }
+  return -1;
+}
+
+function unquoteTomlKey(key) {
+  if ((key[0] === "\"" && key.endsWith("\"")) || (key[0] === "'" && key.endsWith("'"))) {
+    return key.slice(1, -1);
+  }
+  return key;
 }
 
 function toCodexToml(servers) {
