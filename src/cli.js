@@ -850,16 +850,16 @@ function reportChange(cwd, from, to, changes, manualReviews = [], credentials = 
     "",
     ...(manualReviews.length > 0 ? manualReviews.map((item) => `- ${item}`) : ["- None"]),
     "",
-    "## Credentials needed",
+    "## Environment variables needed",
     "",
-    "ai-switch never copies secret values. Provide these in the target tool's environment before the migrated MCP servers will run:",
+    "ai-switch never copies literal env values. Set these variables in the target tool's environment before the migrated MCP servers will run:",
     "",
     ...credentialLines(credentials),
     "",
     "## Notes",
     "",
     "- Secrets and account sessions are intentionally not migrated.",
-    "- MCP commands, args, and env values are copied as configuration data; verify paths and tokens before use.",
+    "- MCP commands, args, and env variable names/references are copied; literal env values are replaced with `$NAME` and never copied. Verify paths before use.",
     "- Skills are copied as files, but runtime compatibility depends on each agent."
   ];
   return {
@@ -911,7 +911,7 @@ function credentialLines(credentials) {
   if (credentials.length === 0) return ["- None"];
   return credentials.map((cred) => cred.isReference
     ? `- ${cred.name} (server: ${cred.server}) — referenced via env; set the same variable for the target tool`
-    : `- ${cred.name} (server: ${cred.server}) — source config had a literal value; written as \`$${cred.name}\` reference instead (the secret was not copied). Set it in the environment and rotate if it was a real secret`);
+    : `- ${cred.name} (server: ${cred.server}) — source config had a literal value; written as \`$${cred.name}\` reference instead (the value was not copied). Set it in the environment, and rotate it if it was a secret`);
 }
 
 function assertNoUnsafeOverwrites(changes, cwd, force = false) {

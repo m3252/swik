@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,6 +24,23 @@ import {
 
 function fixture() {
   return mkdtempSync(path.join(tmpdir(), "ai-switch-"));
+}
+
+// Run `fn` with $HOME pointed at `home` (so os.homedir() resolves there) and
+// console.log silenced, then restore both. Keeps home-directory tests off the
+// developer's real ~ and out of the test log.
+async function withFakeHome(home, fn) {
+  const originalHome = process.env.HOME;
+  const originalLog = console.log;
+  process.env.HOME = home;
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    console.log = originalLog;
+  }
 }
 
 test("detects Claude project files", () => {
@@ -144,7 +161,7 @@ test("inventories required credentials without leaking literal secret values", (
 
   const changes = planCcToCodex(dir);
   const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md")).content;
-  assert.match(report, /## Credentials needed/);
+  assert.match(report, /## Environment variables needed/);
   assert.match(report, /LINEAR_API_KEY \(server: linear\) — referenced via env/);
   assert.match(report, /GITHUB_TOKEN \(server: github\) — source config had a literal value/);
   assert.doesNotMatch(report, /ghp_REALsecret123/);
@@ -205,14 +222,16 @@ test("writes migration with backup only when confirmed", async () => {
 });
 
 test("refuses project writes in the home directory", async () => {
-  await assert.rejects(
-    () => convert("codex", "cc", { cwd: homedir(), yes: true }),
+  const home = fixture();
+  await withFakeHome(home, () => assert.rejects(
+    () => convert("codex", "cc", { cwd: home, yes: true }),
     /Refusing project migration in your home directory/
-  );
+  ));
 });
 
 test("allows read-only dry-run preview in the home directory", async () => {
-  const result = await convert("codex", "cc", { cwd: homedir(), dryRun: true });
+  const home = fixture();
+  const result = await withFakeHome(home, () => convert("codex", "cc", { cwd: home, dryRun: true }));
   assert.equal(result.backupDir, null);
   assert.ok(Array.isArray(result.changes));
 });
