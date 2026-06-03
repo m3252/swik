@@ -100,6 +100,7 @@ Usage:
   ai-switch detect [--cwd <path>]
   ai-switch status [--cwd <path>]
   ai-switch status --global [--home <path>]
+  ai-switch audit [--cwd <path>]
   ai-switch doctor [--cwd <path>]
   ai-switch backup [--cwd <path>]
   ai-switch backups [--cwd <path>] [--global [--home <path>]]
@@ -567,6 +568,17 @@ function analyzeClaudeMcp(servers, existingCodexNames = new Set()) {
       continue;
     }
     if (typeof server?.url === "string") {
+      // Codex's url transport is HTTP (StreamableHttp). Only auto-convert http
+      // (or untyped) url servers; sse/ws/other transports differ and stay manual.
+      if (server.type !== undefined && server.type !== "http") {
+        manualReviews.push(`Claude MCP server "${name}" uses the "${server.type}" transport; only "http" (or untyped) url servers are auto-converted to Codex. Migrate it manually.`);
+        planItems.push({
+          kind: "manual-review",
+          label: `mcp: ${name}`,
+          reason: `Transport "${server.type}" is not auto-converted; only http url servers are.`
+        });
+        continue;
+      }
       const hasAuth = server.headers || Object.keys(server).some((field) => !["type", "url"].includes(field));
       if (hasAuth) {
         manualReviews.push(`Claude MCP server "${name}" is an HTTP server; its URL was migrated, but auth headers need manual setup in Codex (bearer_token_env_var / http_headers).`);
@@ -1091,7 +1103,7 @@ function planCcToCodex(cwd) {
     changes.push({ kind: "copy-dir", from: files.claudeSkills, path: files.agentsSkills });
   }
 
-  changes.push(reportChange(cwd, files.report, "cc", "codex", changes, manualReviews, credentials));
+  changes.push(reportChange(cwd, files.report, "cc", "codex", changes, manualReviews, credentials, auditSurfaces(cwd)));
   return changes;
 }
 
@@ -1123,6 +1135,7 @@ function planCodexToCc(cwd) {
 
   changes.push(...skillCopyChanges(codexSkillSources(files), files.claudeSkills));
 
+  // No Claude-surface audit on codex -> cc: those are target-side, not source gaps.
   changes.push(reportChange(cwd, files.report, "codex", "cc", changes, manualReviews, credentials));
   return changes;
 }
@@ -1140,7 +1153,8 @@ function mergeCodexConfig(current, migratedBlock) {
   return `${current.trimEnd()}\n${migratedBlock}`;
 }
 
-function reportChange(baseDir, reportPath, from, to, changes, manualReviews = [], credentials = []) {
+function reportChange(baseDir, reportPath, from, to, changes, manualReviews = [], credentials = [], audit = []) {
+  const auditGaps = auditGapLines(audit);
   const lines = [
     `# ai-switch migration report`,
     "",
@@ -1156,6 +1170,14 @@ function reportChange(baseDir, reportPath, from, to, changes, manualReviews = []
     "",
     ...(manualReviews.length > 0 ? manualReviews.map((item) => `- ${item}`) : ["- None"]),
     "",
+    ...(auditGaps.length > 0 ? [
+      "## Other Claude surfaces detected (not auto-migrated)",
+      "",
+      "ai-switch migrates instructions, MCP, and skills. These additional surfaces were found and need manual attention — run `ai-switch audit` for the full list:",
+      "",
+      ...auditGaps,
+      ""
+    ] : []),
     "## Environment variables needed",
     "",
     "ai-switch never copies literal env values into target configs or reports. Set these variables in the target tool's environment before the migrated MCP servers will run:",
@@ -1380,6 +1402,10 @@ function doctorReport(cwd) {
   if (!result.claude.settingsFile && !result.codex.configFile && !existsSync(files.mcpJson)) {
     warnings.push("No MCP config found.");
   }
+  const auditGaps = auditSurfaces(cwd).filter((surface) => surface.status !== "migrated");
+  if (auditGaps.length > 0) {
+    warnings.push(`${auditGaps.length} Claude surface(s) won't auto-migrate (run \`ai-switch audit\` for the full list).`);
+  }
   return { result, problems, warnings };
 }
 
@@ -1397,6 +1423,87 @@ function doctor(cwd) {
   }
 }
 
+// Detect Claude Code surfaces beyond the three ai-switch migrates (instructions,
+// MCP, skills) and classify each: migrated (auto), manual (detected, needs hand
+// work in Codex), or unsupported (no Codex equivalent). This is what makes the
+// tool honest about its scope instead of implying a full one-to-one port.
+function auditSurfaces(cwd) {
+  const files = projectPaths(cwd);
+  const surfaces = [];
+  const has = (...rel) => existsSync(path.join(cwd, ...rel));
+  const countEntries = (...rel) => {
+    const dir = path.join(cwd, ...rel);
+    if (!existsSync(dir)) return 0;
+    return readdirSync(dir).filter((name) => name.endsWith(".md") || statSync(path.join(dir, name)).isDirectory()).length;
+  };
+
+  if (has(RELATIVE_PATHS.claudeMd)) surfaces.push({ status: "migrated", surface: "CLAUDE.md", detail: "root instructions → AGENTS.md" });
+
+  // Drive MCP classification from the real convert analysis, not a raw count, so
+  // that http servers with auth (migrated, but auth is manual), sse/ws (rejected),
+  // and cross-source duplicates all surface — count-based logic missed those.
+  const sourceAnalysis = analyzeClaudeMcpSources(cwd);
+  const sources = sourceAnalysis.servers;
+  if (Object.keys(sources).length > 0 || sourceAnalysis.planItems.length > 0) {
+    const analysis = analyzeClaudeMcp(sources, codexMcpNames(readText(files.codexConfig) ?? ""));
+    const migratedCount = Object.keys(analysis.supported).length;
+    if (migratedCount > 0) surfaces.push({ status: "migrated", surface: "MCP servers", detail: `${migratedCount} server(s) (stdio/http) → .codex/config.toml` });
+    const flagged = new Set([...sourceAnalysis.planItems, ...analysis.planItems]
+      .filter((item) => item.kind === "manual-review" || item.kind === "skip")
+      .map((item) => String(item.label).replace(/^mcp: /, "")));
+    if (flagged.size > 0) surfaces.push({ status: "manual", surface: "MCP servers (need manual attention)", detail: `${flagged.size} server(s): ${[...flagged].join(", ")} — transport/auth/duplicate/paths; see the report` });
+  }
+
+  if (has(RELATIVE_PATHS.claudeSkills)) surfaces.push({ status: "migrated", surface: ".claude/skills", detail: "→ .agents/skills" });
+
+  if (has(".claude", "CLAUDE.md")) surfaces.push({ status: "manual", surface: ".claude/CLAUDE.md", detail: "nested instructions are not merged into AGENTS.md" });
+  if (has("CLAUDE.local.md")) surfaces.push({ status: "manual", surface: "CLAUDE.local.md", detail: "local/private instructions are not migrated" });
+  const rules = countEntries(".claude", "rules");
+  if (rules > 0) surfaces.push({ status: "manual", surface: ".claude/rules", detail: `${rules} file(s); rules are not merged into AGENTS.md` });
+  const agents = countEntries(".claude", "agents");
+  if (agents > 0) surfaces.push({ status: "manual", surface: ".claude/agents", detail: `${agents} custom agent(s) use tools/model/hooks; rebuild in Codex manually` });
+  const commands = countEntries(".claude", "commands");
+  if (commands > 0) surfaces.push({ status: "manual", surface: ".claude/commands", detail: `${commands} slash command(s); no direct Codex equivalent` });
+
+  const settings = readJson(files.claudeSettings);
+  if (settings && !settings.__parseError) {
+    const nonMcp = Object.keys(settings).filter((key) => key !== "mcpServers");
+    if (nonMcp.length > 0) surfaces.push({ status: "manual", surface: ".claude/settings.json", detail: `non-MCP keys not migrated: ${nonMcp.join(", ")}` });
+  }
+  // Claude also reads local/private settings from .claude/settings.local.json.
+  if (has(".claude", "settings.local.json")) surfaces.push({ status: "manual", surface: ".claude/settings.local.json", detail: "local/private settings (hooks/permissions/env) are not migrated" });
+
+  if (has(".claude", "output-styles")) surfaces.push({ status: "unsupported", surface: ".claude/output-styles", detail: "no Codex equivalent" });
+  if (has(".claude", "workflows")) surfaces.push({ status: "unsupported", surface: ".claude/workflows", detail: "no Codex equivalent" });
+
+  return surfaces;
+}
+
+function formatAudit(cwd) {
+  const surfaces = auditSurfaces(cwd);
+  const groups = [
+    ["Migrated automatically", "migrated", "✓"],
+    ["Needs manual migration", "manual", "!"],
+    ["Not portable", "unsupported", "✗"]
+  ];
+  const lines = [`Audit: ${cwd}`];
+  for (const [title, status, mark] of groups) {
+    const items = surfaces.filter((surface) => surface.status === status);
+    if (items.length === 0) continue;
+    lines.push("", `${title}:`);
+    for (const item of items) lines.push(`  ${mark} ${item.surface} — ${item.detail}`);
+  }
+  if (surfaces.length === 0) lines.push("", "No Claude Code surfaces detected.");
+  return lines.join("\n");
+}
+
+// Report lines for surfaces that ai-switch did NOT auto-migrate (the gaps).
+function auditGapLines(surfaces) {
+  const gaps = surfaces.filter((surface) => surface.status !== "migrated");
+  if (gaps.length === 0) return [];
+  return gaps.map((surface) => `- ${surface.surface} (${surface.status}): ${surface.detail}`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.version) {
@@ -1412,6 +1519,7 @@ async function main() {
   validateScopeOptions(command, args);
   if (command === "detect") printDetection(detect(args.cwd));
   else if (command === "status") console.log(status(args.cwd, args));
+  else if (command === "audit") console.log(formatAudit(args.cwd));
   else if (command === "doctor") doctor(args.cwd);
   else if (command === "backup") {
     assertProjectWriteScope(args.cwd);
@@ -1483,6 +1591,8 @@ export {
   analyzeClaudeMcp,
   analyzeCodexMcp,
   analyzeClaudeMcpSources,
+  auditSurfaces,
+  formatAudit,
   doctorReport,
   extractClaudeMcp,
   extractCodexMcp,

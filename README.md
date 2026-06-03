@@ -80,6 +80,7 @@ bunx @seungchan.m/ai-switch             # requires Bun
 | `status` | Human-readable summary of the current project |
 | `status --global` | Read-only summary of home-level config (`~/.claude`, `~/.codex`) |
 | `detect` | Machine-readable JSON of detected files |
+| `audit` | Classify every Claude surface as migrated / manual / not-portable |
 | `doctor` | Detect problems and warnings |
 | `convert <from> <to>` | Migrate config (`cc` ↔ `codex`). Add `--dry-run`, `--yes`, `--force` |
 | `backups` | List timestamped backups |
@@ -159,6 +160,24 @@ MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wi
 
 > ai-switch migrates **durable agent instructions and MCP wiring** — not raw chat history, private sessions, or secret values.
 
+## Scope & audit
+
+ai-switch migrates three surfaces — **instructions, MCP servers, and skills**. Claude Code has more (`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, `.claude/agents`, `.claude/commands`, settings `hooks`/`permissions`/…), and those don't have clean one-to-one Codex equivalents. Rather than pretend, `ai-switch audit` lists everything it finds and classifies it:
+
+```text
+Migrated automatically:
+  ✓ CLAUDE.md — root instructions → AGENTS.md
+  ✓ MCP servers — 2 server(s) (stdio/http) → .codex/config.toml
+  ✓ .claude/skills — → .agents/skills
+Needs manual migration:
+  ! .claude/agents — 1 custom agent(s) use tools/model/hooks; rebuild in Codex manually
+  ! .claude/settings.json — non-MCP keys not migrated: hooks, permissions
+Not portable:
+  ✗ .claude/output-styles — no Codex equivalent
+```
+
+Every migration report also includes an **"Other Claude surfaces detected"** section with the non-migrated gaps, so a conversion never silently looks complete when it isn't.
+
 ## Limitations
 
 - Automatic MCP conversion covers stdio servers (`command`, `args`, `env`) and HTTP servers (`url`); auth headers/bearer tokens on HTTP servers are flagged in `ai-switch-report.md` for manual setup, not copied.
@@ -170,6 +189,9 @@ MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wi
 - ✅ Credential inventory — report the env vars each migrated MCP server needs (0.2.0)
 - ✅ Multi-line TOML `args`/`env` parsing (0.2.0)
 - ✅ Global `convert --global` (allowlist-only) for home-level config (0.3.0)
+- ✅ `.agents/skills` coverage + HTTP MCP `url` conversion (0.4.0)
+- ✅ `audit` — classify Claude surfaces as migrated / manual / not-portable (0.5.0)
+- `compile-instructions` — synthesize the CLAUDE.md hierarchy (`.claude/rules`, includes) into AGENTS.md
 - `handoff` — export a concise project-context summary for the next agent (never raw chat history)
 - Adapters for Gemini CLI and Cursor
 - Preserve comments and unknown fields when writing Codex TOML

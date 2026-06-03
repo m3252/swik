@@ -80,6 +80,7 @@ bunx @seungchan.m/ai-switch             # Bun が必要
 | `status` | 現在のプロジェクトの読みやすい要約 |
 | `status --global` | ホームレベル設定（`~/.claude`、`~/.codex`）の読み取り専用の要約 |
 | `detect` | 検出ファイルの機械可読 JSON |
+| `audit` | すべての Claude サーフェスを 自動移行/手動/移行不可 に分類 |
 | `doctor` | 問題と警告を診断 |
 | `convert <from> <to>` | 設定を移行（`cc` ↔ `codex`）。`--dry-run`、`--yes`、`--force` を付加可能 |
 | `backups` | タイムスタンプ付きバックアップの一覧 |

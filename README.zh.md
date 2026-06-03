@@ -80,6 +80,7 @@ bunx @seungchan.m/ai-switch             # 需要 Bun
 | `status` | 当前项目的可读摘要 |
 | `status --global` | 主目录级配置（`~/.claude`、`~/.codex`）的只读摘要 |
 | `detect` | 已检测文件的机器可读 JSON |
+| `audit` | 将每个 Claude 表面分类为 自动迁移/手动/不可移植 |
 | `doctor` | 检测问题与警告 |
 | `convert <from> <to>` | 迁移配置（`cc` ↔ `codex`），可加 `--dry-run`、`--yes`、`--force` |
 | `backups` | 列出带时间戳的备份 |

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   analyzeCodexMcp,
   analyzeClaudeMcpSources,
+  auditSurfaces,
   convert,
   detect,
   detectGlobal,
@@ -713,4 +714,97 @@ test("project backup includes .agents so cc->codex --force is recoverable", asyn
 
   await restoreBackup(dir, "latest", { force: true });
   assert.equal(readFileSync(path.join(dir, ".agents", "skills", "orig", "SKILL.md"), "utf8"), "ORIGINAL\n");
+});
+
+test("audit classifies Claude surfaces as migrated / manual / unsupported", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "skills", "s"), { recursive: true });
+  mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+  mkdirSync(path.join(dir, ".claude", "output-styles"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "p\n");
+  writeFileSync(path.join(dir, "CLAUDE.local.md"), "local\n");
+  writeFileSync(path.join(dir, ".claude", "agents", "rev.md"), "a\n");
+  writeFileSync(path.join(dir, ".claude", "settings.json"), JSON.stringify({ mcpServers: {}, hooks: {}, permissions: {} }));
+
+  const byStatus = (status) => auditSurfaces(dir).filter((s) => s.status === status).map((s) => s.surface);
+  assert.ok(byStatus("migrated").includes("CLAUDE.md"));
+  assert.ok(byStatus("manual").includes("CLAUDE.local.md"));
+  assert.ok(byStatus("manual").includes(".claude/agents"));
+  assert.ok(byStatus("manual").includes(".claude/settings.json"));
+  assert.ok(byStatus("unsupported").includes(".claude/output-styles"));
+});
+
+test("audit gaps appear in the migration report", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "p\n");
+  writeFileSync(path.join(dir, ".claude", "agents", "rev.md"), "a\n");
+
+  const report = planCcToCodex(dir).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  assert.match(report, /## Other Claude surfaces detected/);
+  assert.match(report, /\.claude\/agents \(manual\)/);
+});
+
+test("Claude sse url servers are not auto-converted (only http)", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
+    mcpServers: {
+      streamy: { type: "sse", url: "https://x/sse" },
+      webby: { type: "http", url: "https://y/mcp" }
+    }
+  }));
+  const changes = planCcToCodex(dir);
+  const config = changes.find((c) => c.path?.endsWith(".codex/config.toml")).content;
+  const report = changes.find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  assert.doesNotMatch(config, /streamy/);
+  assert.match(config, /\[mcp_servers\."webby"\]/);
+  assert.match(report, /"streamy" uses the "sse" transport/);
+});
+
+test("audit counts only actually-converted MCP servers as migrated", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
+    mcpServers: {
+      ok: { command: "node", args: ["s.js"] },
+      streamy: { type: "sse", url: "https://x/sse" }
+    }
+  }));
+  const surfaces = auditSurfaces(dir);
+  const migrated = surfaces.find((s) => s.surface === "MCP servers");
+  const manual = surfaces.find((s) => s.surface === "MCP servers (need manual attention)");
+  assert.match(migrated.detail, /^1 server/);
+  assert.ok(manual && manual.status === "manual");
+  assert.match(manual.detail, /streamy/);
+});
+
+test("audit flags http MCP auth as manual even though its url is migrated", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
+    mcpServers: {
+      authed: { type: "http", url: "https://api.example.com/mcp", headers: { Authorization: "Bearer x" } }
+    }
+  }));
+  const surfaces = auditSurfaces(dir);
+  assert.ok(surfaces.some((s) => s.surface === "MCP servers" && s.status === "migrated"));
+  const manual = surfaces.find((s) => s.surface === "MCP servers (need manual attention)");
+  assert.ok(manual && manual.detail.includes("authed"));
+});
+
+test("audit detects .claude/settings.local.json as a private surface", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude"), { recursive: true });
+  writeFileSync(path.join(dir, ".claude", "settings.local.json"), JSON.stringify({ hooks: {} }));
+  assert.ok(auditSurfaces(dir).some((s) => s.surface === ".claude/settings.local.json" && s.status === "manual"));
+});
+
+test("codex->cc report has no Claude-surface gap section", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".codex"), { recursive: true });
+  mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
+  writeFileSync(path.join(dir, "AGENTS.md"), "a\n");
+  writeFileSync(path.join(dir, ".claude", "agents", "x.md"), "x\n");
+  writeFileSync(path.join(dir, ".codex", "config.toml"), '[mcp_servers.x]\ncommand = "c"\n');
+
+  const report = planCodexToCc(dir).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  assert.doesNotMatch(report, /Other Claude surfaces detected/);
 });

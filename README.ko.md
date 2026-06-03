@@ -80,6 +80,7 @@ bunx @seungchan.m/ai-switch             # Bun 필요
 | `status` | 현재 프로젝트의 사람이 읽기 좋은 요약 |
 | `status --global` | 홈 레벨 설정(`~/.claude`, `~/.codex`)의 읽기 전용 요약 |
 | `detect` | 감지된 파일의 기계용 JSON |
+| `audit` | 모든 Claude 표면을 자동/수동/불가로 분류 |
 | `doctor` | 문제와 경고 진단 |
 | `convert <from> <to>` | 설정 변환 (`cc` ↔ `codex`). `--dry-run`, `--yes`, `--force` 추가 가능 |
 | `backups` | 타임스탬프 백업 목록 |
