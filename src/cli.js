@@ -559,7 +559,6 @@ async function convert(fromRaw, toRaw, options) {
   const from = normalizeProvider(fromRaw);
   const to = normalizeProvider(toRaw);
   if (from === to) throw new Error("Source and target providers are the same.");
-  assertProjectWriteScope(options.cwd);
 
   const changes = from === "cc"
     ? planCcToCodex(options.cwd)
@@ -569,6 +568,9 @@ async function convert(fromRaw, toRaw, options) {
     printPlan(changes, options.cwd);
     return { backupDir: null, changes };
   }
+
+  // Read-only previews (status, dry-run) are allowed anywhere; only block writes.
+  assertProjectWriteScope(options.cwd);
 
   if (!options.yes) {
     throw new Error("Refusing to write without --yes. Run with --dry-run first, then add --yes.");

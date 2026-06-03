@@ -131,11 +131,17 @@ test("writes migration with backup only when confirmed", async () => {
   assert.ok(existsSync(path.join(result.backupDir, "CLAUDE.md")));
 });
 
-test("refuses project migrations in the home directory", async () => {
+test("refuses project writes in the home directory", async () => {
   await assert.rejects(
-    () => convert("codex", "cc", { cwd: homedir(), dryRun: true }),
+    () => convert("codex", "cc", { cwd: homedir(), yes: true }),
     /Refusing project migration in your home directory/
   );
+});
+
+test("allows read-only dry-run preview in the home directory", async () => {
+  const result = await convert("codex", "cc", { cwd: homedir(), dryRun: true });
+  assert.equal(result.backupDir, null);
+  assert.ok(Array.isArray(result.changes));
 });
 
 test("refuses unsafe overwrites without force", async () => {
