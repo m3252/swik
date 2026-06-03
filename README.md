@@ -47,11 +47,17 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
-Run project conversions from a repository directory, not from your home directory (`~`). Home-level settings are read-only for now:
+Run project conversions from a repository directory, not from your home directory (`~`). Home-level (global) config has its own explicit `--global` flag:
 
 ```sh
 ai-switch status --global
+ai-switch convert cc codex --global --dry-run
+ai-switch convert cc codex --global --yes
+ai-switch backups --global
+ai-switch restore latest --global
 ```
+
+Global convert is **allowlist-only**: it touches just `CLAUDE.md`/`AGENTS.md`, `settings.json#mcpServers`/`config.toml#mcp_servers`, and `skills/`. It never reads or writes `auth.json`, `sessions/`, `state_*.sqlite`, logs, or caches. Global backups live in `~/.ai-switch/backups/global/`.
 
 During development, run it directly with Node or Bun:
 
@@ -130,7 +136,7 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 | Duplicate MCP names | ⏭️ skipped | — |
 | Account / session data | ❌ | ❌ |
 | Remote chat history | ❌ | ❌ |
-| User-level global config | 🔎 status only | 🔎 status only |
+| User-level global config | ✅ `--global` (allowlist) | ✅ `--global` (allowlist) |
 
 ## How conversion maps
 
@@ -149,7 +155,9 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 
 ## Credentials
 
-MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** between tools or into the report. After a migration, `ai-switch-report.md` lists every credential the migrated servers need, so you can set the same environment variables for the new tool. In the migrated config, any literal value is **rewritten as a `$NAME` reference** — the value itself is never copied — and listed in the report so you can set it in your environment and rotate it if it was a secret.
+MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** between tools or into the report. After a migration, `ai-switch-report.md` lists every credential the migrated servers need, so you can set the same environment variables for the new tool. In the migrated config, any literal value is **rewritten as a `$NAME` reference** — the value itself is never copied into the target config or report — and listed there so you can set it in your environment and rotate it if it was a secret.
+
+> **Backups vs. secrets.** Backups preserve your **original** allowlisted files so `restore` can revert exactly. If your *source* config already contains literal secrets, the local backup (project: `.ai-switch-backups/`, global: `~/.ai-switch/backups/global/`; both gitignored) may contain them too — the report and CLI warn you when this happens. The guarantee is that ai-switch never writes a literal value into the *other tool's* config or the report.
 
 > ai-switch migrates **durable agent instructions and MCP wiring** — not raw chat history, private sessions, or secret values.
 
@@ -157,15 +165,14 @@ MCP servers usually need secrets (API keys, tokens). ai-switch migrates the **wi
 
 - Automatic MCP conversion covers stdio servers (`command`, `args`, `env`); remote HTTP/SSE servers are listed in `ai-switch-report.md` for manual review.
 - **Raw chat history and private sessions are never migrated** — they may contain code, secrets, and personal data, and don't translate across tools. A `handoff` summary export is planned instead.
-- Global (home-level) support is **read-only** for now — `status --global` only; no global `convert` yet.
+- Global `--global` convert is allowlist-only and never touches auth/session/state/log/cache files; broadening the allowlist is intentionally conservative.
 
 ## Roadmap
 
 - ✅ Credential inventory — report the env vars each migrated MCP server needs (0.2.0)
 - ✅ Multi-line TOML `args`/`env` parsing (0.2.0)
-- Memory: migrate global instruction/memory files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) under explicit `--global`
+- ✅ Global `convert --global` (allowlist-only) for home-level config (0.3.0)
 - `handoff` — export a concise project-context summary for the next agent (never raw chat history)
-- Opt-in global `convert --global` for home-level config
 - Adapters for Gemini CLI and Cursor
 - Preserve comments and unknown fields when writing Codex TOML
 - Opt-in `--include-env-values` to copy secret values, behind an explicit danger warning

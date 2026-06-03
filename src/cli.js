@@ -50,8 +50,25 @@ function globalPathsFor(home, env = process.env) {
     agentsMd: path.join(codexRoot, RELATIVE_PATHS.agentsMd),
     codexConfig: path.join(codexRoot, "config.toml"),
     codexSkills: path.join(codexRoot, "skills"),
-    backupDir: path.join(home, GLOBAL_RELATIVE_PATHS.backupDir)
+    backupDir: path.join(home, GLOBAL_RELATIVE_PATHS.backupDir),
+    report: path.join(home, ".ai-switch", RELATIVE_PATHS.report)
   };
+}
+
+// The ONLY global files ai-switch reads or writes. Everything else under
+// ~/.claude and ~/.codex (auth.json, sessions/, state_*.sqlite, logs, caches,
+// rollouts, vendor_imports, ...) is deliberately untouched. Each entry has a
+// stable backup key so backup/restore works regardless of CLAUDE_CONFIG_DIR /
+// CODEX_HOME relocation.
+function globalAllowlist(files) {
+  return [
+    { key: "claude/CLAUDE.md", path: files.claudeMd, dir: false },
+    { key: "claude/settings.json", path: files.claudeSettings, dir: false },
+    { key: "claude/skills", path: files.claudeSkills, dir: true },
+    { key: "codex/AGENTS.md", path: files.agentsMd, dir: false },
+    { key: "codex/config.toml", path: files.codexConfig, dir: false },
+    { key: "codex/skills", path: files.codexSkills, dir: true }
+  ];
 }
 
 function usage() {
@@ -63,9 +80,10 @@ Usage:
   ai-switch status --global [--home <path>]
   ai-switch doctor [--cwd <path>]
   ai-switch backup [--cwd <path>]
-  ai-switch backups [--cwd <path>]
-  ai-switch restore <latest|timestamp> [--cwd <path>] [--force]
+  ai-switch backups [--cwd <path>] [--global [--home <path>]]
+  ai-switch restore <latest|timestamp> [--cwd <path>] [--force] [--global [--home <path>]]
   ai-switch convert <cc|codex> <cc|codex> [--cwd <path>] [--dry-run] [--yes] [--force]
+  ai-switch convert <cc|codex> <cc|codex> --global [--home <path>] [--dry-run] [--yes] [--force]
   ai-switch --version
 
 Examples:
@@ -75,8 +93,10 @@ Examples:
   ai-switch convert codex cc --yes
   ai-switch status
   ai-switch status --global
-  ai-switch backups
-  ai-switch restore latest
+  ai-switch convert cc codex --global --dry-run
+  ai-switch convert cc codex --global --yes
+  ai-switch backups --global
+  ai-switch restore latest --global
 `;
 }
 
@@ -241,7 +261,10 @@ function extractCodexMcp(cwd) {
 }
 
 function analyzeCodexMcp(cwd) {
-  const toml = readText(projectPaths(cwd).codexConfig);
+  return analyzeCodexMcpFromToml(readText(projectPaths(cwd).codexConfig));
+}
+
+function analyzeCodexMcpFromToml(toml) {
   if (!toml) return { servers: {}, manualReviews: [], planItems: [] };
   const servers = {};
   const manualReviews = [];
@@ -726,9 +749,215 @@ async function convert(fromRaw, toRaw, options) {
   return { backupDir, changes };
 }
 
+// ---------------------------------------------------------------------------
+// Global (home-level) convert. Operates ONLY on the allowlisted files in
+// ~/.claude and ~/.codex (never whole directories). Same secret policy as
+// project convert: literal env values become $NAME references. Backups live in
+// ~/.ai-switch/backups/global with a "global" manifest scope.
+// ---------------------------------------------------------------------------
+
+function globalClaudeMcp(files) {
+  const settings = readJson(files.claudeSettings);
+  if (!settings || settings.__parseError) return {};
+  return settings.mcpServers && typeof settings.mcpServers === "object" ? settings.mcpServers : {};
+}
+
+function planCcToCodexGlobal(home, env = process.env) {
+  const files = globalPathsFor(home, env);
+  const changes = [];
+  const manualReviews = [];
+  let credentials = [];
+
+  const claudeMd = readText(files.claudeMd);
+  if (claudeMd) changes.push({ kind: "write", path: files.agentsMd, content: migrateInstruction(claudeMd, "CLAUDE.md") });
+
+  const mcp = globalClaudeMcp(files);
+  if (Object.keys(mcp).length > 0) {
+    const current = readText(files.codexConfig) ?? "";
+    const analysis = analyzeClaudeMcp(mcp, codexMcpNames(current));
+    manualReviews.push(...analysis.manualReviews);
+    changes.push(...analysis.planItems);
+    if (Object.keys(analysis.supported).length > 0) {
+      credentials = collectCredentials(analysis.supported);
+      const migratedBlock = `\n# Migrated from Claude MCP settings by ai-switch.\n${toCodexToml(withReferencedEnv(analysis.supported))}`;
+      changes.push({ kind: "write", path: files.codexConfig, content: mergeCodexConfig(current, migratedBlock) });
+    }
+  }
+
+  if (existsSync(files.claudeSkills)) changes.push({ kind: "copy-dir", from: files.claudeSkills, path: files.codexSkills });
+
+  changes.push(reportChange(home, files.report, "cc", "codex", changes, manualReviews, credentials));
+  return changes;
+}
+
+function planCodexToCcGlobal(home, env = process.env) {
+  const files = globalPathsFor(home, env);
+  const changes = [];
+  const manualReviews = [];
+
+  const agentsMd = readText(files.agentsMd);
+  if (agentsMd) changes.push({ kind: "write", path: files.claudeMd, content: migrateInstruction(agentsMd, "AGENTS.md") });
+
+  const mcpAnalysis = analyzeCodexMcpFromToml(readText(files.codexConfig));
+  manualReviews.push(...mcpAnalysis.manualReviews);
+  changes.push(...mcpAnalysis.planItems);
+  const credentials = collectCredentials(mcpAnalysis.servers);
+  const incoming = mcpAnalysis.servers;
+
+  if (Object.keys(incoming).length > 0) {
+    const existing = readJson(files.claudeSettings);
+    if (existing?.__parseError) {
+      manualReviews.push(`~/.claude/settings.json could not be parsed (${existing.__parseError}); MCP servers were not merged to avoid overwriting it.`);
+    } else {
+      const base = existing && typeof existing === "object" ? existing : {};
+      const existingMcp = base.mcpServers && typeof base.mcpServers === "object" ? base.mcpServers : {};
+      const mergedMcp = { ...existingMcp };
+      for (const [name, def] of Object.entries(withReferencedEnv(incoming))) {
+        if (Object.hasOwn(existingMcp, name)) {
+          manualReviews.push(`Claude MCP server "${name}" was skipped because ~/.claude/settings.json already has a server with that name.`);
+          changes.push({ kind: "skip", label: `mcp: ${name}`, reason: "Claude global settings already has a server with that name." });
+          continue;
+        }
+        mergedMcp[name] = def;
+      }
+      if (JSON.stringify(mergedMcp) !== JSON.stringify(existingMcp)) {
+        changes.push({ kind: "write", path: files.claudeSettings, content: `${JSON.stringify({ ...base, mcpServers: mergedMcp }, null, 2)}\n` });
+      }
+    }
+  }
+
+  if (existsSync(files.codexSkills)) changes.push({ kind: "copy-dir", from: files.codexSkills, path: files.claudeSkills });
+
+  changes.push(reportChange(home, files.report, "codex", "cc", changes, manualReviews, credentials));
+  return changes;
+}
+
+async function convertGlobal(fromRaw, toRaw, options) {
+  const from = normalizeProvider(fromRaw);
+  const to = normalizeProvider(toRaw);
+  if (from === to) throw new Error("Source and target providers are the same.");
+  const home = options.home ?? homedir();
+  const env = options.env ?? process.env;
+  const files = globalPathsFor(home, env);
+
+  const changes = from === "cc" ? planCcToCodexGlobal(home, env) : planCodexToCcGlobal(home, env);
+
+  if (options.dryRun) {
+    printPlan(changes, home);
+    return { backupDir: null, changes };
+  }
+  if (!options.yes) {
+    throw new Error("Refusing to write without --yes. Run with --dry-run first, then add --yes.");
+  }
+  assertNoUnsafeOverwritesGlobal(changes, files, options.force);
+
+  const backupDir = await makeGlobalBackup(home, env, changes);
+  for (const change of fileChanges(changes)) {
+    await mkdir(path.dirname(change.path), { recursive: true });
+    if (change.kind === "copy-dir") await copyTree(change.from, change.path);
+    else await writeFile(change.path, change.content, "utf8");
+  }
+  return { backupDir, changes };
+}
+
+function assertNoUnsafeOverwritesGlobal(changes, files, force = false) {
+  const exempt = new Set([files.report, files.codexConfig, files.claudeSettings]);
+  const unsafe = fileChanges(changes)
+    .filter((change) => existsSync(change.path) && !exempt.has(change.path))
+    .map((change) => change.path);
+  if (unsafe.length > 0 && !force) {
+    throw new Error(`Refusing to overwrite existing global files without --force: ${unsafe.join(", ")}`);
+  }
+}
+
+async function makeGlobalBackup(home, env, changes) {
+  const files = globalPathsFor(home, env);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupDir = path.join(files.backupDir, stamp);
+  await mkdir(backupDir, { recursive: true });
+  const backedUp = [];
+  for (const item of globalAllowlist(files)) {
+    if (!existsSync(item.path)) continue;
+    const target = path.join(backupDir, item.key);
+    await mkdir(path.dirname(target), { recursive: true });
+    if (statSync(item.path).isDirectory()) await copyTree(item.path, target);
+    else await copyFile(item.path, target);
+    backedUp.push({ key: item.key, target: item.path });
+  }
+  const planned = fileChanges(changes).map((change) => change.path);
+  const created = {};
+  for (const change of changes) {
+    if (!change.path || existsSync(change.path)) continue;
+    const hash = expectedHashForChange(change);
+    if (hash) created[change.path] = hash;
+  }
+  await writeFile(path.join(backupDir, ".ai-switch-manifest.json"),
+    `${JSON.stringify({ scope: "global", createdAt: stamp, backedUp, planned, created }, null, 2)}\n`);
+  return backupDir;
+}
+
+async function restoreGlobalBackup(home, selector, env = process.env, options = {}) {
+  const files = globalPathsFor(home, env);
+  const backups = listBackupDirs(files.backupDir);
+  if (backups.length === 0) throw new Error("No ai-switch global backups found.");
+  const stamp = selector === "latest" ? backups.at(-1) : selector;
+  if (!backups.includes(stamp)) throw new Error(`Global backup not found: ${selector}`);
+
+  const backupDir = path.join(files.backupDir, stamp);
+  const manifest = readJson(path.join(backupDir, ".ai-switch-manifest.json"));
+  if (!manifest || manifest.__parseError) throw new Error(`Invalid backup manifest: ${stamp}`);
+
+  const backedUpTargets = new Set((manifest.backedUp ?? []).map((entry) => entry.target));
+  const removals = (manifest.planned ?? []).filter((target) => !backedUpTargets.has(target));
+  for (const target of removals) assertGeneratedAbsUnchanged(target, manifest, options.force);
+  for (const target of removals) {
+    if (existsSync(target)) await rm(target, { recursive: true, force: true });
+  }
+  await pruneEmptyParentsAbs(removals, home);
+  for (const entry of manifest.backedUp ?? []) {
+    const source = path.join(backupDir, entry.key);
+    if (!existsSync(source)) continue;
+    await mkdir(path.dirname(entry.target), { recursive: true });
+    if (statSync(source).isDirectory()) {
+      await rm(entry.target, { recursive: true, force: true });
+      await copyTree(source, entry.target);
+    } else await copyFile(source, entry.target);
+  }
+  return backupDir;
+}
+
+// Remove now-empty directories left behind after deleting migration-created
+// files (e.g. a fresh ~/.codex). rmdir fails on non-empty dirs, so anything
+// still holding auth/sessions/other files is preserved. Stops at `home`.
+async function pruneEmptyParentsAbs(paths, stopDir) {
+  for (const target of paths) {
+    let dir = path.dirname(target);
+    while (dir.startsWith(stopDir) && dir !== stopDir && dir !== path.dirname(dir)) {
+      try {
+        await rmdir(dir);
+      } catch {
+        break;
+      }
+      dir = path.dirname(dir);
+    }
+  }
+}
+
+function assertGeneratedAbsUnchanged(target, manifest, force = false) {
+  if (!existsSync(target)) return;
+  const expectedHash = manifest.created?.[target];
+  if (!expectedHash) {
+    if (!force) throw new Error(`Refusing to remove ${target}; backup has no hash metadata. Re-run restore with --force to remove it.`);
+    return;
+  }
+  if (hashPath(target) !== expectedHash && !force) {
+    throw new Error(`Refusing to remove changed migration-created path without --force: ${target}`);
+  }
+}
+
 function assertProjectWriteScope(cwd) {
   if (!isHomeDirectory(cwd)) return;
-  throw new Error("Refusing project migration in your home directory. Run convert/backup/restore inside a project directory. Use `ai-switch status --global` to inspect home-level settings; global convert is not supported yet.");
+  throw new Error("Refusing project migration in your home directory. Run convert/backup/restore inside a project directory, or use `--global` for home-level config (e.g. `ai-switch convert cc codex --global`).");
 }
 
 function isHomeDirectory(cwd, home = homedir()) {
@@ -782,7 +1011,7 @@ function planCcToCodex(cwd) {
     changes.push({ kind: "copy-dir", from: claudeSkills, path: files.codexSkills });
   }
 
-  changes.push(reportChange(cwd, "cc", "codex", changes, manualReviews, credentials));
+  changes.push(reportChange(cwd, files.report, "cc", "codex", changes, manualReviews, credentials));
   return changes;
 }
 
@@ -817,7 +1046,7 @@ function planCodexToCc(cwd) {
     changes.push({ kind: "copy-dir", from: codexSkills, path: files.claudeSkills });
   }
 
-  changes.push(reportChange(cwd, "codex", "cc", changes, manualReviews, credentials));
+  changes.push(reportChange(cwd, files.report, "codex", "cc", changes, manualReviews, credentials));
   return changes;
 }
 
@@ -834,7 +1063,7 @@ function mergeCodexConfig(current, migratedBlock) {
   return `${current.trimEnd()}\n${migratedBlock}`;
 }
 
-function reportChange(cwd, from, to, changes, manualReviews = [], credentials = []) {
+function reportChange(baseDir, reportPath, from, to, changes, manualReviews = [], credentials = []) {
   const lines = [
     `# ai-switch migration report`,
     "",
@@ -844,7 +1073,7 @@ function reportChange(cwd, from, to, changes, manualReviews = [], credentials = 
     "",
     "## Planned changes",
     "",
-    ...fileChanges(changes).map((change) => `- ${change.kind}: ${path.relative(cwd, change.path)}`),
+    ...fileChanges(changes).map((change) => `- ${change.kind}: ${path.relative(baseDir, change.path)}`),
     "",
     "## Manual review needed",
     "",
@@ -852,20 +1081,22 @@ function reportChange(cwd, from, to, changes, manualReviews = [], credentials = 
     "",
     "## Environment variables needed",
     "",
-    "ai-switch never copies literal env values. Set these variables in the target tool's environment before the migrated MCP servers will run:",
+    "ai-switch never copies literal env values into target configs or reports. Set these variables in the target tool's environment before the migrated MCP servers will run:",
     "",
     ...credentialLines(credentials),
     "",
     "## Notes",
     "",
     "- Secrets and account sessions are intentionally not migrated.",
-    "- MCP commands, args, and env variable names/references are copied; literal env values are replaced with `$NAME` and never copied. Verify paths before use.",
+    "- Literal env values are replaced with `$NAME` in the migrated config and this report; they are never written into the target tool. Verify paths before use.",
+    "- Backups preserve your original allowlisted files (project: `.ai-switch-backups/`, global: `~/.ai-switch/backups/global/`, both gitignored). If those files contain literal secrets, the backup will too.",
     "- Skills are copied as files, but runtime compatibility depends on each agent."
   ];
   return {
     kind: "write",
-    path: projectPaths(cwd).report,
+    path: reportPath,
     content: `${lines.join("\n")}\n`,
+    report: true,
     manualReviews,
     credentials
   };
@@ -888,6 +1119,46 @@ function collectCredentials(serversMap) {
 
 function isEnvReference(value) {
   return typeof value === "string" && /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(value.trim());
+}
+
+// Scan the config files that a migration would back up (not just the servers it
+// converts) for literal env values, so the CLI warning covers secrets already
+// sitting in the existing target config too.
+function literalEnvNamesInConfigs(configs) {
+  const names = new Set();
+  for (const config of configs) {
+    if (!existsSync(config.path)) continue;
+    let servers = {};
+    if (config.format === "json") {
+      const data = readJson(config.path);
+      if (data && !data.__parseError && data.mcpServers && typeof data.mcpServers === "object") servers = data.mcpServers;
+    } else {
+      servers = analyzeCodexMcpFromToml(readText(config.path)).servers;
+    }
+    for (const def of Object.values(servers)) {
+      for (const [name, value] of Object.entries(def?.env ?? {})) {
+        if (!isEnvReference(value)) names.add(name);
+      }
+    }
+  }
+  return [...names];
+}
+
+function projectConfigScanList(cwd) {
+  const files = projectPaths(cwd);
+  return [
+    { path: files.mcpJson, format: "json" },
+    { path: files.claudeSettings, format: "json" },
+    { path: files.codexConfig, format: "toml" }
+  ];
+}
+
+function globalConfigScanList(home, env = process.env) {
+  const files = globalPathsFor(home, env);
+  return [
+    { path: files.claudeSettings, format: "json" },
+    { path: files.codexConfig, format: "toml" }
+  ];
 }
 
 // Never write a secret value into the target config. `$VAR` references pass
@@ -936,7 +1207,7 @@ function planLabel(change, cwd) {
     return { action: change.kind, label: change.label, reason: change.reason };
   }
   const relative = path.relative(cwd, change.path);
-  if (relative === RELATIVE_PATHS.report) return { action: "report", label: relative };
+  if (change.report || relative === RELATIVE_PATHS.report) return { action: "report", label: relative };
   if (change.kind === "copy-dir") {
     return {
       action: existsSync(change.path) ? "merge" : "copy",
@@ -944,7 +1215,7 @@ function planLabel(change, cwd) {
     };
   }
   if (!existsSync(change.path)) return { action: "create", label: relative };
-  if (relative === RELATIVE_PATHS.codexConfig) return { action: "update", label: relative };
+  if (relative === RELATIVE_PATHS.codexConfig || relative === RELATIVE_PATHS.claudeSettings) return { action: "update", label: relative };
   return { action: "overwrite", label: relative };
 }
 
@@ -971,7 +1242,7 @@ function projectStatus(cwd) {
   const result = detect(cwd);
   const backups = listBackups(cwd).length;
   const notes = isHomeDirectory(cwd)
-    ? ["Note: this is your home directory. Use `ai-switch status --global` for home-level settings; run conversions inside a project directory."]
+    ? ["Note: this is your home directory. For home-level config use `--global` (e.g. `ai-switch convert cc codex --global`); run project conversions inside a project directory."]
     : [];
   return [
     `Project: ${result.cwd}`,
@@ -1070,17 +1341,32 @@ async function main() {
     console.log(await makeBackup(args.cwd));
   }
   else if (command === "backups") {
-    const backups = listBackups(args.cwd);
+    const backups = args.global ? listGlobalBackups(args.home ?? homedir()) : listBackups(args.cwd);
     console.log(backups.length > 0 ? backups.join("\n") : "No ai-switch backups found.");
   }
   else if (command === "restore") {
-    assertProjectWriteScope(args.cwd);
     const selector = from ?? "latest";
-    const restored = await restoreBackup(args.cwd, selector, { force: args.force });
-    console.log(`restored from backup: ${restored}`);
+    if (args.global) {
+      const restored = await restoreGlobalBackup(args.home ?? homedir(), selector, args.env ?? process.env, { force: args.force });
+      console.log(`restored from global backup: ${restored}`);
+    } else {
+      assertProjectWriteScope(args.cwd);
+      const restored = await restoreBackup(args.cwd, selector, { force: args.force });
+      console.log(`restored from backup: ${restored}`);
+    }
   }
   else if (command === "convert") {
-    const result = await convert(from, to, args);
+    const result = args.global
+      ? await convertGlobal(from, to, { ...args, home: args.home ?? homedir() })
+      : await convert(from, to, args);
+    const literalNames = args.global
+      ? literalEnvNamesInConfigs(globalConfigScanList(args.home ?? homedir(), args.env ?? process.env))
+      : literalEnvNamesInConfigs(projectConfigScanList(args.cwd));
+    if (literalNames.length > 0) {
+      console.log(args.dryRun
+        ? `warning: your config has literal env values (${literalNames.join(", ")}); a real run (--yes) creates a local backup that will preserve them.`
+        : `warning: your config has literal env values (${literalNames.join(", ")}); the local backup preserves them for rollback.`);
+    }
     console.log(args.dryRun ? "dry-run complete" : `migrated with backup: ${result.backupDir}`);
   } else {
     throw new Error(`Unknown command: ${command}`);
@@ -1089,7 +1375,10 @@ async function main() {
 
 function validateScopeOptions(command, args) {
   if (args.home && !args.global) throw new Error("--home requires --global.");
-  if (args.global && command !== "status") throw new Error("--global is currently supported only for status.");
+  const globalCommands = new Set(["status", "convert", "backups", "restore"]);
+  if (args.global && !globalCommands.has(command)) {
+    throw new Error(`--global is not supported for "${command}". Use it with status, convert, backups, or restore.`);
+  }
 }
 
 // Resolve symlinks on both sides: npm installs the bin as a symlink, so a raw
@@ -1127,7 +1416,12 @@ export {
   planLabel,
   planCcToCodex,
   planCodexToCc,
+  planCcToCodexGlobal,
+  planCodexToCcGlobal,
+  convertGlobal,
+  literalEnvNamesInConfigs,
   restoreBackup,
+  restoreGlobalBackup,
   status,
   toCodexToml
 };

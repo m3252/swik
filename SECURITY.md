@@ -1,6 +1,6 @@
 # Security Policy
 
-`ai-switch` moves project-level agent configuration. Treat migration output as sensitive until you review it.
+`ai-switch` moves agent configuration between Claude Code and Codex, at the project level or — with explicit `--global` — at the home level (allowlisted files only). Treat migration output as sensitive until you review it.
 
 ## Supported Data
 
@@ -24,4 +24,12 @@ Please open a private security advisory or contact the maintainers before publis
 
 ## Handling Secrets
 
-The CLI may copy environment values that already exist in project MCP configuration. It does not verify whether those values are secrets. Always review generated config before running migrated agents.
+`ai-switch` never copies literal environment values into target configs or reports. A literal `env` value is written as a `$NAME` reference and listed in the report; you set the actual variable in the target tool's environment.
+
+Backups preserve the original allowlisted source files for rollback, so if your source config already contains literal secrets, the local backup may contain them too. Backups are local only, live under `~/.ai-switch/` (global) or `.ai-switch-backups/` (project), and are `.gitignore`d. When a migration sees literal env values, the report and the CLI print a warning that the backup may preserve them.
+
+The CLI does not verify whether a value is actually a secret. Always review generated config before running migrated agents.
+
+## Global Scope
+
+`--global` operates only on an allowlist: `CLAUDE.md`/`AGENTS.md`, `settings.json#mcpServers`/`config.toml#mcp_servers`, and `skills/`. It never reads or writes `auth.json`, `sessions/`, `state_*.sqlite`, logs, caches, or any other file under `~/.claude` and `~/.codex`.

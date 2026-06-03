@@ -47,11 +47,17 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
-프로젝트 변환은 홈 디렉터리(`~`)가 아니라 실제 저장소/프로젝트 디렉터리에서 실행하세요. 홈 레벨 설정은 현재 읽기 전용으로만 확인할 수 있습니다:
+프로젝트 변환은 홈 디렉터리(`~`)가 아니라 실제 저장소/프로젝트 디렉터리에서 실행하세요. 홈 레벨(글로벌) 설정은 별도의 `--global` 플래그를 씁니다:
 
 ```sh
 ai-switch status --global
+ai-switch convert cc codex --global --dry-run
+ai-switch convert cc codex --global --yes
+ai-switch backups --global
+ai-switch restore latest --global
 ```
+
+글로벌 convert는 **allowlist 전용**입니다: `CLAUDE.md`/`AGENTS.md`, `settings.json#mcpServers`/`config.toml#mcp_servers`, `skills/`만 다룹니다. `auth.json`, `sessions/`, `state_*.sqlite`, 로그, 캐시는 절대 읽거나 쓰지 않습니다. 글로벌 백업은 `~/.ai-switch/backups/global/`에 저장됩니다.
 
 개발 중에는 Node나 Bun으로 직접 실행할 수 있습니다:
 
@@ -130,7 +136,7 @@ report        ai-switch-report.md
 | 중복 MCP 이름 | ⏭️ 건너뜀 | — |
 | 계정 / 세션 데이터 | ❌ | ❌ |
 | 원격 대화 기록 | ❌ | ❌ |
-| 사용자 레벨 글로벌 설정 | 🔎 status만 | 🔎 status만 |
+| 사용자 레벨 글로벌 설정 | ✅ `--global` (allowlist) | ✅ `--global` (allowlist) |
 
 ## 변환 매핑
 
@@ -149,7 +155,9 @@ report        ai-switch-report.md
 
 ## 자격증명
 
-MCP 서버는 보통 시크릿(API 키, 토큰)이 필요합니다. ai-switch는 **배선** — 서버 이름, command, args, env 변수 *이름* — 만 옮기고, 시크릿 **값**은 도구 간에도 리포트에도 절대 복사하지 않습니다. 마이그레이션 후 `ai-switch-report.md`가 마이그레이션된 서버에 필요한 자격증명 목록을 보여주므로, 같은 환경변수만 새 도구에 설정하면 됩니다. 변환된 설정에서 리터럴 값은 **`$NAME` 참조로 다시 쓰여**(값 자체는 절대 복사되지 않음) 리포트에 표시되니, 환경변수로 설정하고 시크릿이었다면 교체하세요.
+MCP 서버는 보통 시크릿(API 키, 토큰)이 필요합니다. ai-switch는 **배선** — 서버 이름, command, args, env 변수 *이름* — 만 옮기고, 시크릿 **값**은 도구 간에도 리포트에도 절대 복사하지 않습니다. 마이그레이션 후 `ai-switch-report.md`가 마이그레이션된 서버에 필요한 자격증명 목록을 보여주므로, 같은 환경변수만 새 도구에 설정하면 됩니다. 변환된 설정에서 리터럴 값은 **`$NAME` 참조로 다시 쓰여**(값 자체는 target config나 report에 절대 복사되지 않음) 표시되니, 환경변수로 설정하고 시크릿이었다면 교체하세요.
+
+> **백업과 시크릿.** 백업은 `restore`가 정확히 되돌릴 수 있도록 **원본** allowlist 파일을 보존합니다. *source* 설정에 이미 리터럴 시크릿이 있으면 로컬 백업(프로젝트: `.ai-switch-backups/`, 글로벌: `~/.ai-switch/backups/global/`; 둘 다 gitignored)에도 포함될 수 있고 — 이 경우 report와 CLI가 경고합니다. 보장하는 것은 ai-switch가 리터럴 값을 *다른 도구의* 설정이나 report에 절대 쓰지 않는다는 것입니다.
 
 > ai-switch는 **지속적인 에이전트 인스트럭션과 MCP 배선**을 옮깁니다 — raw 채팅 기록, 비공개 세션, 시크릿 값은 옮기지 않습니다.
 
@@ -157,15 +165,14 @@ MCP 서버는 보통 시크릿(API 키, 토큰)이 필요합니다. ai-switch는
 
 - 자동 MCP 변환은 stdio 서버(`command`, `args`, `env`)만 지원하며, 원격 HTTP/SSE 서버는 `ai-switch-report.md`에 수동 검토 항목으로 표시됩니다.
 - **raw 채팅 기록과 비공개 세션은 절대 옮기지 않습니다** — 코드·시크릿·개인정보가 섞여 있을 수 있고 도구 간에 의미가 통하지 않습니다. 대신 `handoff` 요약 내보내기를 계획 중입니다.
-- 글로벌(홈 레벨) 지원은 현재 **읽기 전용** — `status --global`만 가능하며 글로벌 `convert`는 아직 없습니다.
+- 글로벌 `--global` convert는 allowlist 전용이며 auth/session/state/log/cache 파일은 절대 건드리지 않습니다. allowlist 확장은 의도적으로 보수적입니다.
 
 ## 로드맵
 
 - ✅ 자격증명 인벤토리 — 마이그레이션된 각 MCP 서버에 필요한 env 변수를 리포트 (0.2.0)
 - ✅ 멀티라인 TOML `args`/`env` 파싱 (0.2.0)
-- 메모리: 글로벌 인스트럭션/메모리 파일(`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)을 명시적 `--global`에서 마이그레이션
+- ✅ 글로벌 `convert --global` (allowlist 전용) — 홈 레벨 설정 (0.3.0)
 - `handoff` — 다음 에이전트를 위한 간결한 프로젝트 컨텍스트 요약 내보내기 (raw 채팅 아님)
-- 옵트인 글로벌 `convert --global` (홈 레벨 설정)
 - Gemini CLI, Cursor용 어댑터
 - Codex TOML을 쓸 때 주석과 알 수 없는 필드 보존
 - 옵트인 `--include-env-values` (시크릿 값 복사, 명시적 위험 경고 뒤에)

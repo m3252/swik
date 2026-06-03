@@ -18,6 +18,10 @@ import {
   planLabel,
   planCcToCodex,
   planCodexToCc,
+  planCcToCodexGlobal,
+  convertGlobal,
+  restoreGlobalBackup,
+  literalEnvNamesInConfigs,
   restoreBackup,
   status
 } from "../src/cli.js";
@@ -552,4 +556,74 @@ test("does not stack migration instruction headers", () => {
 
   assert.equal([...twice.matchAll(/Migrated from/g)].length, 1);
   assert.match(twice, /Review carefully/);
+});
+
+test("global cc->codex migrates allowlisted files and references secret env", () => {
+  const home = fixture();
+  mkdirSync(path.join(home, ".claude", "skills", "review"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "CLAUDE.md"), "Be concise.\n");
+  writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+    theme: "dark",
+    mcpServers: { linear: { command: "npx", args: ["-y", "linear-mcp"], env: { LINEAR_API_KEY: "lin_SECRET" } } }
+  }));
+  writeFileSync(path.join(home, ".claude", "skills", "review", "SKILL.md"), "x\n");
+
+  const changes = planCcToCodexGlobal(home, {});
+  const config = changes.find((c) => c.path?.endsWith(".codex/config.toml")).content;
+  assert.match(config, /\[mcp_servers\."linear"\]/);
+  assert.match(config, /"LINEAR_API_KEY" = "\$LINEAR_API_KEY"/);
+  assert.doesNotMatch(config, /lin_SECRET/);
+  assert.ok(changes.some((c) => c.path?.endsWith(".codex/AGENTS.md")));
+  assert.ok(changes.some((c) => c.kind === "copy-dir" && c.path?.endsWith(".codex/skills")));
+});
+
+test("global codex->cc merges into settings.json preserving other keys", async () => {
+  const home = fixture();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  mkdirSync(path.join(home, ".codex"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ theme: "dark", editorMode: "vim" }));
+  writeFileSync(path.join(home, ".codex", "AGENTS.md"), "a\n");
+  writeFileSync(path.join(home, ".codex", "config.toml"), '[mcp_servers.pg]\ncommand = "uvx"\nenv = { "DB" = "secret://x" }\n');
+
+  await convertGlobal("codex", "cc", { home, env: {}, yes: true });
+  const settings = JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
+  assert.equal(settings.theme, "dark");
+  assert.equal(settings.editorMode, "vim");
+  assert.equal(settings.mcpServers.pg.command, "uvx");
+  assert.equal(settings.mcpServers.pg.env.DB, "$DB");
+});
+
+test("global backup contains only allowlisted files, never auth/sessions", async () => {
+  const home = fixture();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  mkdirSync(path.join(home, ".codex", "sessions"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "CLAUDE.md"), "x\n");
+  writeFileSync(path.join(home, ".codex", "auth.json"), "AUTH");
+  writeFileSync(path.join(home, ".codex", "sessions", "s.jsonl"), "S");
+
+  const res = await convertGlobal("cc", "codex", { home, env: {}, yes: true });
+  assert.ok(existsSync(path.join(res.backupDir, "claude", "CLAUDE.md")));
+  assert.equal(existsSync(path.join(res.backupDir, "codex", "auth.json")), false);
+  assert.equal(existsSync(path.join(res.backupDir, "codex", "sessions")), false);
+  assert.equal(readFileSync(path.join(home, ".codex", "auth.json"), "utf8"), "AUTH");
+});
+
+test("global restore reverts a migration", async () => {
+  const home = fixture();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "CLAUDE.md"), "orig\n");
+
+  await convertGlobal("cc", "codex", { home, env: {}, yes: true });
+  assert.ok(existsSync(path.join(home, ".codex", "AGENTS.md")));
+
+  await restoreGlobalBackup(home, "latest", {});
+  assert.equal(existsSync(path.join(home, ".codex", "AGENTS.md")), false);
+  assert.equal(readFileSync(path.join(home, ".claude", "CLAUDE.md"), "utf8"), "orig\n");
+});
+
+test("literalEnvNamesInConfigs flags literal env in existing target config, not just converted servers", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "config.toml"), '[mcp_servers.legacy]\ncommand = "old"\nenv = { "OLD_TOKEN" = "tok_REAL", "REF" = "$REF" }\n');
+  const names = literalEnvNamesInConfigs([{ path: path.join(dir, "config.toml"), format: "toml" }]);
+  assert.deepEqual(names, ["OLD_TOKEN"]);
 });

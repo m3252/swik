@@ -47,11 +47,17 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
-プロジェクト変換はホームディレクトリ（`~`）ではなく、実際のリポジトリ/プロジェクトディレクトリで実行してください。ホームレベル設定は現在、読み取り専用で確認できます：
+プロジェクト変換はホームディレクトリ（`~`）ではなく、実際のリポジトリ/プロジェクトディレクトリで実行してください。ホームレベル（グローバル）設定には専用の `--global` フラグがあります：
 
 ```sh
 ai-switch status --global
+ai-switch convert cc codex --global --dry-run
+ai-switch convert cc codex --global --yes
+ai-switch backups --global
+ai-switch restore latest --global
 ```
+
+グローバル convert は **allowlist 限定**です：`CLAUDE.md`/`AGENTS.md`、`settings.json#mcpServers`/`config.toml#mcp_servers`、`skills/` のみを扱います。`auth.json`、`sessions/`、`state_*.sqlite`、ログ、キャッシュは決して読み書きしません。グローバルバックアップは `~/.ai-switch/backups/global/` に保存されます。
 
 開発中は Node または Bun で直接実行できます：
 
@@ -130,7 +136,7 @@ report        ai-switch-report.md
 | 重複する MCP 名 | ⏭️ スキップ | — |
 | アカウント / セッションデータ | ❌ | ❌ |
 | リモートのチャット履歴 | ❌ | ❌ |
-| ユーザーレベルのグローバル設定 | 🔎 status のみ | 🔎 status のみ |
+| ユーザーレベルのグローバル設定 | ✅ `--global`（allowlist） | ✅ `--global`（allowlist） |
 
 ## 変換マッピング
 
@@ -149,7 +155,9 @@ report        ai-switch-report.md
 
 ## 認証情報
 
-MCP サーバーは通常シークレット（API キー、トークン）を必要とします。ai-switch は**配線** —— サーバー名・command・args・env 変数の*名前* —— のみを移行し、シークレットの**値**はツール間にもレポートにも決してコピーしません。移行後、`ai-switch-report.md` が移行済みサーバーに必要な認証情報の一覧を示すので、同じ環境変数を新しいツールに設定するだけで済みます。移行後の設定では、リテラル値は**`$NAME` 参照に書き換えられ**（値自体は決してコピーされません）、レポートに一覧化されるので、環境変数に設定し、シークレットだった場合はローテーションしてください。
+MCP サーバーは通常シークレット（API キー、トークン）を必要とします。ai-switch は**配線** —— サーバー名・command・args・env 変数の*名前* —— のみを移行し、シークレットの**値**はツール間にもレポートにも決してコピーしません。移行後、`ai-switch-report.md` が移行済みサーバーに必要な認証情報の一覧を示すので、同じ環境変数を新しいツールに設定するだけで済みます。移行後の設定では、リテラル値は**`$NAME` 参照に書き換えられ**（値自体はターゲット設定にもレポートにも決してコピーされません）、レポートに一覧化されるので、環境変数に設定し、シークレットだった場合はローテーションしてください。
+
+> **バックアップとシークレット。** バックアップは `restore` が正確に元へ戻せるよう、**元の** allowlist ファイルを保持します。*ソース*設定に既にリテラルのシークレットがある場合、ローカルバックアップ（プロジェクト: `.ai-switch-backups/`、グローバル: `~/.ai-switch/backups/global/`；いずれも gitignore 済み）にもそれが含まれることがあり —— その際はレポートと CLI が警告します。保証するのは、ai-switch がリテラル値を*別ツール*の設定やレポートに決して書き込まないことです。
 
 > ai-switch が移行するのは**永続的なエージェント指示と MCP 配線**であり、生のチャット履歴・プライベートセッション・シークレット値ではありません。
 
@@ -157,15 +165,14 @@ MCP サーバーは通常シークレット（API キー、トークン）を必
 
 - 自動 MCP 変換は stdio サーバー（`command`、`args`、`env`）のみ対応。リモートの HTTP/SSE サーバーは `ai-switch-report.md` に手動レビュー項目として記載されます。
 - **生のチャット履歴とプライベートセッションは決して移行しません** —— コード・シークレット・個人情報が混在しうえ、ツール間で意味が通じません。代わりに `handoff` 要約エクスポートを予定しています。
-- グローバル（ホームレベル）対応は現在**読み取り専用** —— `status --global` のみで、グローバルな `convert` はまだありません。
+- グローバル `--global` convert は allowlist 限定で、auth/session/state/log/cache ファイルには決して触れません。allowlist の拡張は意図的に保守的にしています。
 
 ## ロードマップ
 
 - ✅ 認証情報インベントリ —— 移行済み各 MCP サーバーが必要とする env 変数をレポート（0.2.0）
 - ✅ 複数行 TOML `args`/`env` の解析（0.2.0）
-- メモリ：明示的な `--global` でグローバル指示/メモリファイル（`~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`）を移行
+- ✅ グローバル `convert --global`（allowlist 限定）—— ホームレベル設定（0.3.0）
 - `handoff` —— 次のエージェント向けに簡潔なプロジェクト文脈の要約をエクスポート（生のチャットではない）
-- オプトインのグローバル `convert --global`（ホームレベル設定）
 - Gemini CLI、Cursor 向けアダプター
 - Codex TOML 書き込み時にコメントと未知のフィールドを保持
 - オプトインの `--include-env-values`（シークレット値のコピー、明確な危険警告の後ろ）
