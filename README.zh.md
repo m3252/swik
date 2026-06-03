@@ -50,12 +50,11 @@ node ./src/cli.js status
 bun run src/cli.js convert cc codex --dry-run
 ```
 
-计划中的安装方式：
+安装：
 
 ```sh
-npm install -g @seungchan.m/ai-switch
-bunx @seungchan.m/ai-switch
-brew install m3252/tap/ai-switch
+npm install -g @seungchan.m/ai-switch   # 需要 Node 20+
+bunx @seungchan.m/ai-switch             # 需要 Bun
 ```
 
 ## 命令
@@ -148,7 +147,7 @@ report        ai-switch-report.md
 
 - 写入 Codex TOML 时保留注释与未知字段
 - 可选启用的全局（`convert --global`）支持
-- npm 发布 + Homebrew tap 自动化
+- npm 发布自动化
 - 为 Gemini CLI、Cursor、Windsurf、Aider 提供适配器
 
 ## 贡献

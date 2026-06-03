@@ -50,12 +50,11 @@ node ./src/cli.js status
 bun run src/cli.js convert cc codex --dry-run
 ```
 
-Planned package targets:
+Install:
 
 ```sh
-npm install -g @seungchan.m/ai-switch
-bunx @seungchan.m/ai-switch
-brew install m3252/tap/ai-switch
+npm install -g @seungchan.m/ai-switch   # Node 20+
+bunx @seungchan.m/ai-switch             # requires Bun
 ```
 
 ## Commands
@@ -148,7 +147,7 @@ The example deliberately includes one stdio MCP server (auto-migrated) and one H
 
 - Preserve comments and unknown fields when writing Codex TOML
 - Opt-in global (`convert --global`) support
-- npm publish + Homebrew tap automation
+- npm publish automation
 - Adapters for Gemini CLI, Cursor, Windsurf, and Aider
 
 ## Contributing

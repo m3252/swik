@@ -50,12 +50,11 @@ node ./src/cli.js status
 bun run src/cli.js convert cc codex --dry-run
 ```
 
-배포 예정 설치 경로:
+설치:
 
 ```sh
-npm install -g @seungchan.m/ai-switch
-bunx @seungchan.m/ai-switch
-brew install m3252/tap/ai-switch
+npm install -g @seungchan.m/ai-switch   # Node 20+ 필요
+bunx @seungchan.m/ai-switch             # Bun 필요
 ```
 
 ## 명령어
@@ -148,7 +147,7 @@ report        ai-switch-report.md
 
 - Codex TOML을 쓸 때 주석과 알 수 없는 필드 보존
 - 옵트인 글로벌(`convert --global`) 지원
-- npm 배포 + Homebrew tap 자동화
+- npm 배포 자동화
 - Gemini CLI, Cursor, Windsurf, Aider용 어댑터
 
 ## 기여
