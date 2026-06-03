@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -130,6 +131,13 @@ test("writes migration with backup only when confirmed", async () => {
   assert.ok(existsSync(path.join(result.backupDir, "CLAUDE.md")));
 });
 
+test("refuses project migrations in the home directory", async () => {
+  await assert.rejects(
+    () => convert("codex", "cc", { cwd: homedir(), dryRun: true }),
+    /Refusing project migration in your home directory/
+  );
+});
+
 test("refuses unsafe overwrites without force", async () => {
   const dir = fixture();
   writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");
@@ -191,6 +199,20 @@ test("restore prunes empty directories created by migration", async () => {
 
   await restoreBackup(dir, "latest");
   assert.equal(existsSync(path.join(dir, ".codex")), false);
+});
+
+test("skips special files while backing up and copying skill directories", async () => {
+  const dir = fixture();
+  const specialDir = path.join(dir, ".codex", "skills", ".git");
+  const specialPath = path.join(specialDir, "fsmonitor--daemon.ipc");
+  mkdirSync(specialDir, { recursive: true });
+  writeFileSync(path.join(dir, ".codex", "skills", "SKILL.md"), "Codex skill.\n");
+  execFileSync("mkfifo", [specialPath]);
+
+  await convert("codex", "cc", { cwd: dir, yes: true });
+
+  assert.ok(existsSync(path.join(dir, ".claude", "skills", "SKILL.md")));
+  assert.equal(existsSync(path.join(dir, ".claude", "skills", ".git", "fsmonitor--daemon.ipc")), false);
 });
 
 test("restore refuses to delete changed migration-created files without force", async () => {

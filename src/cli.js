@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { copyFile, cp, mkdir, rm, rmdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -411,7 +411,7 @@ async function makeBackup(cwd, changes = []) {
     if (!existsSync(source)) continue;
     const target = path.join(backupDir, relative);
     await mkdir(path.dirname(target), { recursive: true });
-    if (statSync(source).isDirectory()) await cp(source, target, { recursive: true });
+    if (statSync(source).isDirectory()) await copyTree(source, target);
     else await copyFile(source, target);
     backedUp.push(relative);
   }
@@ -438,16 +438,38 @@ function hashText(value) {
 
 function hashPath(target) {
   if (!existsSync(target)) return undefined;
-  const stats = statSync(target);
-  if (!stats.isDirectory()) return hashText(readFileSync(target));
+  const stats = lstatSync(target);
+  if (stats.isSymbolicLink()) return hashText(`symlink:${readlinkSync(target)}`);
+  if (!stats.isDirectory()) {
+    if (!stats.isFile()) return undefined;
+    return hashText(readFileSync(target));
+  }
 
   const hash = createHash("sha256");
   hash.update("dir\n");
   for (const name of readdirSync(target).sort()) {
     const child = path.join(target, name);
-    hash.update(`${name}\0${hashPath(child)}\n`);
+    const childHash = hashPath(child);
+    if (childHash === undefined) continue;
+    hash.update(`${name}\0${childHash}\n`);
   }
   return hash.digest("hex");
+}
+
+async function copyTree(from, to) {
+  await cp(from, to, {
+    recursive: true,
+    filter: (source) => isCopyablePath(source)
+  });
+}
+
+function isCopyablePath(source) {
+  try {
+    const stats = lstatSync(source);
+    return stats.isDirectory() || stats.isFile() || stats.isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function listBackups(cwd) {
@@ -493,7 +515,7 @@ async function restoreBackup(cwd, selector, options = {}) {
     await mkdir(path.dirname(target), { recursive: true });
     if (statSync(source).isDirectory()) {
       await rm(target, { recursive: true, force: true });
-      await cp(source, target, { recursive: true });
+      await copyTree(source, target);
     }
     else await copyFile(source, target);
   }
@@ -537,6 +559,7 @@ async function convert(fromRaw, toRaw, options) {
   const from = normalizeProvider(fromRaw);
   const to = normalizeProvider(toRaw);
   if (from === to) throw new Error("Source and target providers are the same.");
+  assertProjectWriteScope(options.cwd);
 
   const changes = from === "cc"
     ? planCcToCodex(options.cwd)
@@ -556,10 +579,27 @@ async function convert(fromRaw, toRaw, options) {
   const backupDir = await makeBackup(options.cwd, changes);
   for (const change of fileChanges(changes)) {
     await mkdir(path.dirname(change.path), { recursive: true });
-    if (change.kind === "copy-dir") await cp(change.from, change.path, { recursive: true });
+    if (change.kind === "copy-dir") await copyTree(change.from, change.path);
     else await writeFile(change.path, change.content, "utf8");
   }
   return { backupDir, changes };
+}
+
+function assertProjectWriteScope(cwd) {
+  if (!isHomeDirectory(cwd)) return;
+  throw new Error("Refusing project migration in your home directory. Run convert/backup/restore inside a project directory. Use `ai-switch status --global` to inspect home-level settings; global convert is not supported yet.");
+}
+
+function isHomeDirectory(cwd, home = homedir()) {
+  return realPathOrResolve(cwd) === realPathOrResolve(home);
+}
+
+function realPathOrResolve(target) {
+  try {
+    return realpathSync(target);
+  } catch {
+    return path.resolve(target);
+  }
 }
 
 function planCcToCodex(cwd) {
@@ -736,11 +776,15 @@ function status(cwd, options = {}) {
 function projectStatus(cwd) {
   const result = detect(cwd);
   const backups = listBackups(cwd).length;
+  const notes = isHomeDirectory(cwd)
+    ? ["Note: this is your home directory. Use `ai-switch status --global` for home-level settings; run conversions inside a project directory."]
+    : [];
   return [
     `Project: ${result.cwd}`,
     formatProviderStatus("Claude Code", result.claude, cwd, RELATIVE_PATHS.claudeMd),
     formatProviderStatus("Codex", result.codex, cwd, RELATIVE_PATHS.agentsMd),
     `Backups: ${backups}`,
+    ...notes,
     ...(result.parseErrors.length > 0 ? ["Parse errors:", ...result.parseErrors.map((item) => `- ${item}`)] : [])
   ].join("\n");
 }
@@ -827,12 +871,16 @@ async function main() {
   if (command === "detect") printDetection(detect(args.cwd));
   else if (command === "status") console.log(status(args.cwd, args));
   else if (command === "doctor") doctor(args.cwd);
-  else if (command === "backup") console.log(await makeBackup(args.cwd));
+  else if (command === "backup") {
+    assertProjectWriteScope(args.cwd);
+    console.log(await makeBackup(args.cwd));
+  }
   else if (command === "backups") {
     const backups = listBackups(args.cwd);
     console.log(backups.length > 0 ? backups.join("\n") : "No ai-switch backups found.");
   }
   else if (command === "restore") {
+    assertProjectWriteScope(args.cwd);
     const selector = from ?? "latest";
     const restored = await restoreBackup(args.cwd, selector, { force: args.force });
     console.log(`restored from backup: ${restored}`);

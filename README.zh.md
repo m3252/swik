@@ -43,6 +43,12 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
+请在实际仓库/项目目录中运行项目转换，不要在主目录（`~`）中运行。主目录级设置目前只能只读查看：
+
+```sh
+ai-switch status --global
+```
+
 开发期间可用 Node 或 Bun 直接运行：
 
 ```sh

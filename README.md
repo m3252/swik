@@ -43,6 +43,12 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
+Run project conversions from a repository directory, not from your home directory (`~`). Home-level settings are read-only for now:
+
+```sh
+ai-switch status --global
+```
+
 During development, run it directly with Node or Bun:
 
 ```sh

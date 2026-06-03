@@ -43,6 +43,12 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
+프로젝트 변환은 홈 디렉터리(`~`)가 아니라 실제 저장소/프로젝트 디렉터리에서 실행하세요. 홈 레벨 설정은 현재 읽기 전용으로만 확인할 수 있습니다:
+
+```sh
+ai-switch status --global
+```
+
 개발 중에는 Node나 Bun으로 직접 실행할 수 있습니다:
 
 ```sh

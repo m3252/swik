@@ -43,6 +43,12 @@ ai-switch convert cc codex --yes
 ai-switch restore latest
 ```
 
+プロジェクト変換はホームディレクトリ（`~`）ではなく、実際のリポジトリ/プロジェクトディレクトリで実行してください。ホームレベル設定は現在、読み取り専用で確認できます：
+
+```sh
+ai-switch status --global
+```
+
 開発中は Node または Bun で直接実行できます：
 
 ```sh
