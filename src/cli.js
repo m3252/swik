@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { copyFile, cp, mkdir, rm, rmdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { version: VERSION } = require("../package.json");
 
 const ROOT = process.cwd();
 const SUPPORTED = new Set(["cc", "claude", "claude-code", "codex"]);
@@ -810,7 +814,7 @@ function doctor(cwd) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.version) {
-    console.log("0.1.0");
+    console.log(VERSION);
     return;
   }
   if (args.help || args._.length === 0) {
@@ -846,8 +850,18 @@ function validateScopeOptions(command, args) {
   if (args.global && command !== "status") throw new Error("--global is currently supported only for status.");
 }
 
-const isMain = process.argv[1] === fileURLToPath(import.meta.url);
-if (isMain) {
+// Resolve symlinks on both sides: npm installs the bin as a symlink, so a raw
+// path comparison would make `process.argv[1]` (the symlink) differ from the
+// real module path and skip main() entirely.
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+if (isMainModule()) {
   main().catch((error) => {
     console.error(error.message);
     process.exit(1);
