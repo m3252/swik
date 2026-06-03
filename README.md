@@ -1,182 +1,160 @@
 # ai-switch
 
-`ai-switch` is a small CLI for moving project-level agent context between Claude Code and Codex.
+**English** · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md)
 
-It focuses on files that belong to the project:
+> Switch your project's agent setup between **Claude Code** and **Codex** — instructions, MCP servers, and skills — safely and reversibly.
 
-- instructions: `CLAUDE.md` and `AGENTS.md`
-- MCP server settings: `.mcp.json`, `.claude/settings.json`, `.codex/config.toml`
-- local skills: `.claude/skills` and `.codex/skills`
+[![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-It does not migrate accounts, sessions, remote chat history, or secrets outside the project.
+When you move to a new phone, a migration app carries over your contacts and settings. `ai-switch` does the same thing for AI coding tools: it moves the **project-level config** that you would otherwise re-create by hand when switching between Claude Code and Codex.
 
-This repository is built from public behavior and project file formats only. Do not copy proprietary, leaked, or reverse-engineered source code into this project.
+It never touches accounts, sessions, chat history, or secrets outside your project — and every change is backed up so you can undo it.
 
-## Install
+---
 
-During development:
+## Why
+
+If you use more than one AI coding agent, you keep re-writing the same setup: instruction files, MCP servers, and skills. `ai-switch` converts them in one command and **reports anything it can't safely auto-convert** instead of silently dropping it.
+
+## What it moves
+
+| Type | Claude Code | Codex |
+| --- | --- | --- |
+| Instructions | `CLAUDE.md` | `AGENTS.md` |
+| MCP servers | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` |
+| Skills | `.claude/skills/` | `.codex/skills/` |
+
+**Out of scope (by design):** accounts, sessions, remote chat history, API keys/secrets.
+
+## Quick start
 
 ```sh
-node ./src/cli.js --help
+# Inspect what's in the current project
+ai-switch status
+
+# Preview a migration (no files written)
+ai-switch convert cc codex --dry-run
+
+# Apply it (creates a backup first)
+ai-switch convert cc codex --yes
+
+# Changed your mind? Roll it back
+ai-switch restore latest
 ```
 
-With Bun once it is installed:
+During development, run it directly with Node or Bun:
 
 ```sh
-bun run src/cli.js --help
+node ./src/cli.js status
 bun run src/cli.js convert cc codex --dry-run
 ```
 
-Later package targets:
+Planned package targets:
 
 ```sh
-bunx @seungchan/ai-switch
 npm install -g @seungchan/ai-switch
+bunx @seungchan/ai-switch
 brew install m3252/tap/ai-switch
 ```
 
-## Usage
+## Commands
 
-Inspect a project:
+| Command | What it does |
+| --- | --- |
+| `status` | Human-readable summary of the current project |
+| `status --global` | Read-only summary of home-level config (`~/.claude`, `~/.codex`) |
+| `detect` | Machine-readable JSON of detected files |
+| `doctor` | Detect problems and warnings |
+| `convert <from> <to>` | Migrate config (`cc` ↔ `codex`). Add `--dry-run`, `--yes`, `--force` |
+| `backups` | List timestamped backups |
+| `restore latest \| <timestamp>` | Restore a backup and undo a migration |
 
-```sh
-ai-switch status
-ai-switch detect
-ai-switch doctor
-```
-
-Example status output:
+`status` reads like this:
 
 ```text
 Claude Code  CLAUDE.md, 2 MCP servers (.mcp.json), 1 skill
 Codex        no AGENTS.md, no MCP config, no skills
 ```
 
-Inspect global agent settings:
+Global status follows `CLAUDE_CONFIG_DIR` / `CODEX_HOME` when set, instead of assuming `~/.claude` and `~/.codex`.
 
-```sh
-ai-switch status --global
-```
+## Example
 
-Global status is read-only and looks at home-level config only:
-
-```text
-Claude Code  CLAUDE.md, 2 MCP servers (~/.claude/settings.json), 1 skill
-Codex        AGENTS.md, 1 MCP server (~/.codex/config.toml), no skills
-```
-
-When `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is set, global status follows those provider-specific locations instead of assuming `~/.claude` and `~/.codex`.
-
-Preview a migration:
-
-```sh
-ai-switch convert cc codex --dry-run
-ai-switch convert codex cc --dry-run
-```
-
-Write changes:
-
-```sh
-ai-switch convert cc codex --yes
-ai-switch convert codex cc --yes
-```
-
-Every write creates a timestamped backup in `.ai-switch-backups/`. Existing target files are not overwritten unless you pass `--force`; `.codex/config.toml` is the exception because migrations preserve existing content and append only new non-conflicting MCP servers.
-
-List and restore backups:
-
-```sh
-ai-switch backups
-ai-switch restore latest
-ai-switch restore <timestamp>
-```
-
-## Quick Demo
-
-Preview Claude Code to Codex migration using the bundled example:
+Preview the bundled example — dry runs show exactly what will happen before anything is written:
 
 ```sh
 node src/cli.js convert cc codex --dry-run --cwd examples/claude-project
 ```
 
-Dry runs show what will happen before any file is written:
-
 ```text
 create        AGENTS.md
-manual-review mcp: linear (Only stdio command/args/env servers are converted automatically. Found fields: type, url.)
+manual-review mcp: linear (HTTP server — only stdio command/args/env are auto-converted)
 create        .codex/config.toml
 copy          .claude/skills -> .codex/skills
 report        ai-switch-report.md
 ```
 
-Copy an example to a temporary directory and write the migration:
+The example deliberately includes one stdio MCP server (auto-migrated) and one HTTP MCP server (flagged for manual review), so you can see both paths.
 
-```sh
-tmpdir=$(mktemp -d)
-cp -R examples/claude-project/. "$tmpdir"
-node src/cli.js convert cc codex --yes --cwd "$tmpdir"
-cat "$tmpdir/.codex/config.toml"
-cat "$tmpdir/ai-switch-report.md"
-```
+## Safety model
 
-The example includes one stdio MCP server that can be migrated and one HTTP MCP server that is intentionally left for manual review.
+`ai-switch` is conservative by default:
 
-## Support Matrix
+- 🔍 `--dry-run` prints the plan and writes nothing
+- ✋ writes require `--yes`
+- 🛡️ existing files are **not** overwritten without `--force`
+- 💾 every write snapshots to `.ai-switch-backups/<timestamp>/`
+- ↩️ `restore latest` undoes a migration — restoring originals and removing files it created
+- 🚫 restore refuses to delete migration-created files you've since edited (unless `--force`)
 
-| Feature | cc -> codex | codex -> cc |
+`.codex/config.toml` is the one exception to the overwrite rule: migrations preserve existing content and only append new, non-conflicting MCP servers.
+
+## Support matrix
+
+| Feature | cc → codex | codex → cc |
 | --- | --- | --- |
-| Project instructions | yes | yes |
-| Stdio MCP servers | yes | yes |
-| HTTP/SSE MCP servers | manual review | manual review |
-| Local skills | copied | copied |
-| Existing duplicate MCP names | skipped | n/a |
-| Account/session data | no | no |
-| Remote chat history | no | no |
-| User-level global settings | planned | planned |
+| Project instructions | ✅ | ✅ |
+| Stdio MCP servers | ✅ | ✅ |
+| HTTP/SSE MCP servers | 📝 manual review | 📝 manual review |
+| Local skills | ✅ copied | ✅ copied |
+| Duplicate MCP names | ⏭️ skipped | — |
+| Account / session data | ❌ | ❌ |
+| Remote chat history | ❌ | ❌ |
+| User-level global config | 🔎 status only | 🔎 status only |
 
-## Current Mapping
+## How conversion maps
 
-Claude Code to Codex:
+**Claude Code → Codex**
+- `CLAUDE.md` → `AGENTS.md`
+- `.claude/settings.json#mcpServers` or `.mcp.json#mcpServers` → `.codex/config.toml`
+- HTTP/SSE servers without a stdio `command` → reported for manual review
+- MCP names already in `.codex/config.toml` → skipped (no duplicate TOML sections)
+- `.claude/skills` → `.codex/skills`
 
-- `CLAUDE.md` -> `AGENTS.md`
-- `.claude/settings.json#mcpServers` or `.mcp.json#mcpServers` -> `.codex/config.toml`
-- unsupported MCP servers, such as HTTP/SSE servers without a stdio `command`, are reported for manual review
-- MCP servers with names that already exist in `.codex/config.toml` are skipped to avoid duplicate TOML sections
-- `.claude/skills` -> `.codex/skills`
+**Codex → Claude Code**
+- `AGENTS.md` → `CLAUDE.md`
+- `.codex/config.toml` MCP sections → `.mcp.json`
+- Codex sections without a stdio `command` → reported for manual review
+- `.codex/skills` → `.claude/skills`
 
-Codex to Claude Code:
+## Limitations
 
-- `AGENTS.md` -> `CLAUDE.md`
-- `.codex/config.toml` MCP sections -> `.mcp.json`
-- Codex MCP sections without a stdio `command` are reported for manual review
-- `.codex/skills` -> `.claude/skills`
-
-## Design Notes
-
-The project is intentionally dependency-free at the start so it can run through Node or Bun. The converter is conservative: it copies compatible config fields and writes a report for anything that needs manual verification.
-
-## Safety Model
-
-- `--dry-run` prints the planned file operations without writing files.
-- write operations require `--yes`
-- existing target files require `--force` before they can be overwritten
-- every write creates `.ai-switch-backups/<timestamp>/`
-- `ai-switch restore latest` restores the latest backup and removes files created by that migration
-- repeated instruction migrations do not stack `ai-switch` migration headers
-- account sessions, API keys outside project config, and remote history are out of scope
-- MCP values are treated as configuration data and should be reviewed before running either agent
-
-## Current Limitations
-
-- automatic MCP conversion is limited to stdio-style servers with `command`, `args`, and `env`
-- remote HTTP/SSE MCP servers are preserved as manual-review items in `ai-switch-report.md`
-- Codex TOML parsing is intentionally minimal and currently expects simple single-line `args` and inline `env`
-- restore refuses to delete changed migration-created files unless `--force` is used
+- Automatic MCP conversion covers stdio servers (`command`, `args`, `env`); remote HTTP/SSE servers are listed in `ai-switch-report.md` for manual review.
+- TOML parsing is intentionally minimal and currently expects single-line `args` and inline `env`.
+- Global (home-level) support is **read-only** for now — `status --global` only; no global `convert` yet.
 
 ## Roadmap
 
-- preserve comments and unknown fields in Codex TOML instead of appending migrated MCP blocks
-- support user-level config with explicit opt-in
-- add package release automation for npm
-- add a Homebrew tap formula after the first tagged release
-- add adapters for Gemini CLI, Cursor, Windsurf, and Aider
+- Preserve comments and unknown fields when writing Codex TOML
+- Opt-in global (`convert --global`) support
+- npm publish + Homebrew tap automation
+- Adapters for Gemini CLI, Cursor, Windsurf, and Aider
+
+## Contributing
+
+Issues and PRs welcome. This project is built from **public behavior and documented file formats only** — please do not add proprietary, leaked, or reverse-engineered source. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)
