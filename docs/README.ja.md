@@ -4,9 +4,9 @@
 
 [![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
-[English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
+[English](../README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
 
 Claude Code と Codex を行き来するたびに手で作り直すことになる**プロジェクト単位の設定**を運ぶ、依存ゼロの CLI です。すべての書き込みはバックアップされ、すべての実行は `--dry-run` でプレビューでき、安全に自動変換できないものは**捨てずにレポート**します。
 
@@ -198,8 +198,8 @@ Not portable:
 
 ## コントリビュート
 
-Issue と PR を歓迎します。本プロジェクトは**公開された挙動と文書化されたファイル形式のみ**から作られています —— 専有・流出・リバースエンジニアリングされたソースは追加しないでください。[CONTRIBUTING.md](CONTRIBUTING.md) と [SECURITY.md](SECURITY.md) を参照してください。
+Issue と PR を歓迎します。本プロジェクトは**公開された挙動と文書化されたファイル形式のみ**から作られています —— 専有・流出・リバースエンジニアリングされたソースは追加しないでください。[CONTRIBUTING.md](../CONTRIBUTING.md) と [SECURITY.md](../SECURITY.md) を参照してください。
 
 ## ライセンス
 
-[MIT](LICENSE)
+[MIT](../LICENSE)

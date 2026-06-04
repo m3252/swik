@@ -4,9 +4,9 @@
 
 [![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
-[English](README.md) · [한국어](README.ko.md) · **中文** · [日本語](README.ja.md)
+[English](../README.md) · [한국어](README.ko.md) · **中文** · [日本語](README.ja.md)
 
 一个零依赖的 CLI，帮你搬运在 Claude Code 与 Codex 之间切换时本来要手动重建的**项目级配置**。每次写入都会备份，每次运行都可用 `--dry-run` 预览，无法安全自动转换的内容会被**报告而非丢弃**。
 
@@ -198,8 +198,8 @@ Not portable:
 
 ## 贡献
 
-欢迎 Issue 与 PR。本项目**仅基于公开行为与有文档的文件格式**构建 —— 请勿加入专有、泄露或逆向工程的源码。参见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。
+欢迎 Issue 与 PR。本项目**仅基于公开行为与有文档的文件格式**构建 —— 请勿加入专有、泄露或逆向工程的源码。参见 [CONTRIBUTING.md](../CONTRIBUTING.md) 与 [SECURITY.md](../SECURITY.md)。
 
 ## 许可证
 
-[MIT](LICENSE)
+[MIT](../LICENSE)

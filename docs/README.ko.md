@@ -4,9 +4,9 @@
 
 [![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
-[English](README.md) · **한국어** · [中文](README.zh.md) · [日本語](README.ja.md)
+[English](../README.md) · **한국어** · [中文](README.zh.md) · [日本語](README.ja.md)
 
 Claude Code와 Codex를 오갈 때 손으로 다시 만들어야 하는 **프로젝트 단위 설정**을 옮겨주는 의존성 0짜리 CLI입니다. 모든 쓰기는 백업되고, 모든 실행은 `--dry-run`으로 미리 볼 수 있으며, 안전하게 자동 변환할 수 없는 건 **버리지 않고 리포트**합니다.
 
@@ -198,8 +198,8 @@ Not portable:
 
 ## 기여
 
-이슈와 PR 환영합니다. 이 프로젝트는 **공개된 동작과 문서화된 파일 포맷만**으로 만들어졌습니다 — 독점·유출·리버스 엔지니어링된 소스는 추가하지 마세요. [CONTRIBUTING.md](CONTRIBUTING.md)와 [SECURITY.md](SECURITY.md)를 참고하세요.
+이슈와 PR 환영합니다. 이 프로젝트는 **공개된 동작과 문서화된 파일 포맷만**으로 만들어졌습니다 — 독점·유출·리버스 엔지니어링된 소스는 추가하지 마세요. [CONTRIBUTING.md](../CONTRIBUTING.md)와 [SECURITY.md](../SECURITY.md)를 참고하세요.
 
 ## 라이선스
 
-[MIT](LICENSE)
+[MIT](../LICENSE)

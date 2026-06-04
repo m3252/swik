@@ -6,7 +6,7 @@
 [![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**English** · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md)
+**English** · [한국어](docs/README.ko.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md)
 
 A zero-dependency CLI that moves the **project-level setup** you'd otherwise rebuild by hand when switching between Claude Code and Codex. Every write is backed up, every run previews with `--dry-run`, and anything it can't safely auto-convert is **reported, not dropped**.
 
