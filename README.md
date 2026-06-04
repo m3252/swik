@@ -1,6 +1,6 @@
 # ai-switch
 
-> Move project config between **Claude Code** and **Codex**: instructions, MCP servers, and skills. Preview first, back up every write, restore when needed.
+> Move agent setup between **Claude Code** and **OpenAI Codex CLI**: instructions, MCP servers, and skills. Preview first, back up every write, restore when needed.
 
 [![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
@@ -8,7 +8,7 @@
 
 **English** · [한국어](docs/README.ko.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md)
 
-`ai-switch` is a zero-dependency CLI for switching projects between Claude Code and Codex without rebuilding the same setup by hand. It migrates only portable project config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
+`ai-switch` is a zero-dependency CLI for switching projects between Claude Code and OpenAI Codex CLI without rebuilding the same setup by hand. It migrates only portable agent config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
 
 ## Try It
 
