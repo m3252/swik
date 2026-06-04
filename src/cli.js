@@ -648,11 +648,29 @@ function doctorReport(cwd) {
   if (auditGaps.length > 0) {
     warnings.push(`${auditGaps.length} Claude surface(s) won't auto-migrate (run \`ai-switch audit\` for the full list).`);
   }
-  return { result, problems, warnings };
+  return { result, problems, warnings, suggestions: doctorSuggestions(result, problems, warnings, auditGaps) };
+}
+
+function doctorSuggestions(result, problems, warnings, auditGaps) {
+  const suggestions = [];
+  if (problems.length > 0) {
+    if (result.parseErrors.length > 0) suggestions.push("Fix parse errors before running a migration.");
+    if (!result.claude.instructionFile && !result.codex.instructionFile) suggestions.push("Run `swik status` from a project root, or add CLAUDE.md / AGENTS.md first.");
+  }
+
+  const hasClaude = Boolean(result.claude.instructionFile || result.claude.settingsFile || result.claude.mcpFile || result.claude.skillsDir);
+  const hasCodex = Boolean(result.codex.instructionFile || result.codex.configFile || result.codex.skillsDir);
+  if (hasClaude && !result.codex.instructionFile) suggestions.push("Preview Claude Code -> Codex with `swik convert cc codex --compile --dry-run`.");
+  if (hasCodex && !result.claude.instructionFile) suggestions.push("Preview Codex -> Claude Code with `swik convert codex cc --dry-run`.");
+
+  if (auditGaps.length > 0) suggestions.push("Run `swik audit` to see which Claude Code surfaces need manual migration.");
+  if (warnings.includes("No MCP config found.")) suggestions.push("If this project uses MCP, add .mcp.json or .codex/config.toml before converting.");
+
+  return [...new Set(suggestions)];
 }
 
 function doctor(cwd) {
-  const { result, problems, warnings } = doctorReport(cwd);
+  const { result, problems, warnings, suggestions } = doctorReport(cwd);
   printDetection(result);
   if (problems.length > 0) {
     console.log("\nProblems:");
@@ -662,6 +680,10 @@ function doctor(cwd) {
   if (warnings.length > 0) {
     console.log("\nWarnings:");
     for (const warning of warnings) console.log(`- ${warning}`);
+  }
+  if (suggestions.length > 0) {
+    console.log("\nSuggested next commands:");
+    for (const suggestion of suggestions) console.log(`- ${suggestion}`);
   }
 }
 

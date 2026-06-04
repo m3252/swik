@@ -358,6 +358,21 @@ test("doctor treats missing MCP as warning when instructions exist", () => {
   const report = doctorReport(dir);
   assert.deepEqual(report.problems, []);
   assert.deepEqual(report.warnings, ["No MCP config found."]);
+  assert.match(report.suggestions.join("\n"), /swik convert cc codex --compile --dry-run/);
+  assert.match(report.suggestions.join("\n"), /\.mcp\.json or \.codex\/config\.toml/);
+});
+
+test("doctor CLI prints suggested next commands", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");
+
+  const output = execFileSync(process.execPath, ["src/cli.js", "doctor", "--cwd", dir], {
+    cwd: path.resolve("."),
+    encoding: "utf8"
+  });
+
+  assert.match(output, /Suggested next commands:/);
+  assert.match(output, /swik convert cc codex --compile --dry-run/);
 });
 
 test("status returns a human-readable project summary", () => {
