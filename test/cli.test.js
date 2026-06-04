@@ -447,6 +447,27 @@ test("parses handoff output options", () => {
   assert.equal(args.force, true);
 });
 
+test("package exposes ai-switch and swik binaries", () => {
+  const pkg = JSON.parse(readFileSync(path.resolve("package.json"), "utf8"));
+  assert.equal(pkg.bin["ai-switch"], "src/cli.js");
+  assert.equal(pkg.bin.swik, "src/cli.js");
+});
+
+test("swik alias prints swik-oriented help", () => {
+  const dir = fixture();
+  const aliasPath = path.join(dir, "swik");
+  symlinkSync(path.resolve("src/cli.js"), aliasPath);
+
+  const output = execFileSync(process.execPath, [aliasPath, "--help"], {
+    cwd: path.resolve("."),
+    encoding: "utf8"
+  });
+
+  assert.match(output, /^swik\n/);
+  assert.match(output, /Alias: ai-switch/);
+  assert.match(output, /swik convert cc codex --compile --dry-run/);
+});
+
 test("rejects unknown options", () => {
   assert.throws(
     () => parseArgs(["convert", "cc", "codex", "--frce"]),

@@ -55,38 +55,41 @@ function countSkillDirs(dirs) {
   return dirs.reduce((total, dir) => total + listDir(dir).length, 0);
 }
 
-function usage() {
-  return `ai-switch
+function usage(commandName = "ai-switch") {
+  const bin = commandName === "swik" ? "swik" : "ai-switch";
+  const alias = bin === "swik" ? "ai-switch" : "swik";
+  return `${bin}
+
+Alias: ${alias}
 
 Usage:
-  ai-switch detect [--cwd <path>]
-  ai-switch status [--cwd <path>]
-  ai-switch status --global [--home <path>]
-  ai-switch audit [--cwd <path>]
-  ai-switch doctor [--cwd <path>]
-  ai-switch handoff [--cwd <path>] [--output CODEX-HANDOFF.md] [--stdout] [--force] [--from <cc|codex>] [--to <cc|codex>]
-  ai-switch backup [--cwd <path>]
-  ai-switch backups [--cwd <path>] [--global [--home <path>]]
-  ai-switch restore <latest|timestamp> [--cwd <path>] [--force] [--global [--home <path>]]
-  ai-switch convert <cc|codex> <cc|codex> [--cwd <path>] [--dry-run] [--yes] [--force]
-  ai-switch convert cc codex --compile [--include-local] [--dry-run] [--yes]
-  ai-switch convert <cc|codex> <cc|codex> --global [--home <path>] [--dry-run] [--yes] [--force]
-  ai-switch --version
+  ${bin} detect [--cwd <path>]
+  ${bin} status [--cwd <path>]
+  ${bin} status --global [--home <path>]
+  ${bin} audit [--cwd <path>]
+  ${bin} doctor [--cwd <path>]
+  ${bin} handoff [--cwd <path>] [--output CODEX-HANDOFF.md] [--stdout] [--force] [--from <cc|codex>] [--to <cc|codex>]
+  ${bin} backup [--cwd <path>]
+  ${bin} backups [--cwd <path>] [--global [--home <path>]]
+  ${bin} restore <latest|timestamp> [--cwd <path>] [--force] [--global [--home <path>]]
+  ${bin} convert <cc|codex> <cc|codex> [--cwd <path>] [--dry-run] [--yes] [--force]
+  ${bin} convert cc codex --compile [--include-local] [--dry-run] [--yes]
+  ${bin} convert <cc|codex> <cc|codex> --global [--home <path>] [--dry-run] [--yes] [--force]
+  ${bin} --version
 
 Examples:
-  ai-switch convert cc codex --dry-run
-  ai-switch convert cc codex --yes
-  ai-switch convert cc codex --yes --force
-  ai-switch convert codex cc --yes
-  ai-switch status
-  ai-switch status --global
-  ai-switch handoff
-  ai-switch handoff --stdout
-  ai-switch handoff --from codex --to cc
-  ai-switch convert cc codex --global --dry-run
-  ai-switch convert cc codex --global --yes
-  ai-switch backups --global
-  ai-switch restore latest --global
+  ${bin} status
+  ${bin} audit
+  ${bin} convert cc codex --compile --dry-run
+  ${bin} convert cc codex --compile --yes
+  ${bin} convert codex cc --dry-run
+  ${bin} convert codex cc --yes
+  ${bin} handoff
+  ${bin} handoff --stdout
+  ${bin} status --global
+  ${bin} convert cc codex --global --dry-run
+  ${bin} backups --global
+  ${bin} restore latest --global
 `;
 }
 
@@ -759,7 +762,7 @@ async function main() {
     return;
   }
   if (args.help || args._.length === 0) {
-    console.log(usage());
+    console.log(usage(path.basename(process.argv[1] ?? "ai-switch")));
     return;
   }
 

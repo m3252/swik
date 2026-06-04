@@ -1,6 +1,6 @@
 # ai-switch
 
-> Migrate project config between **Claude Code** and **Codex** — `CLAUDE.md`/`AGENTS.md`, MCP servers, and skills. Reversible, with backups.
+> Move project config between **Claude Code** and **Codex**: instructions, MCP servers, and skills. Preview first, back up every write, restore when needed.
 
 [![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
@@ -8,180 +8,253 @@
 
 **English** · [한국어](docs/README.ko.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md)
 
-A zero-dependency CLI that moves the **project-level setup** you'd otherwise rebuild by hand when switching between Claude Code and Codex. Every write is backed up, every run previews with `--dry-run`, and anything it can't safely auto-convert is **reported, not dropped**.
+`ai-switch` is a zero-dependency CLI for switching projects between Claude Code and Codex without rebuilding the same setup by hand. It migrates only portable project config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
 
-It never touches accounts, sessions, chat history, or secret values.
+## Try It
 
-## Why
-
-AI coding tools ship improvements almost every week. The best tool for a task today may not be the best one next month — and staying on whatever you're used to, out of habit, quietly costs you the productivity newer tools unlock. To maximize your productivity, use the best tool available *right now*, not the one you happened to learn first.
-
-What makes switching painful is having to **rebuild your setup by hand** — instructions, MCP servers, skills — every single time. That friction is the real lock-in.
-
-`ai-switch` removes it by making your setup portable. Convert it in one command and follow the best tool instead of the one you happened to configure: try something new this week, switch back the next, or run both across different projects. Anything it can't safely auto-convert is reported for manual review, never silently dropped.
-
-## Install
+Run once without installing:
 
 ```sh
-npm install -g @seungchan.m/ai-switch   # Node 20+
-
-# or run once, without installing:
 npx @seungchan.m/ai-switch status
+npx @seungchan.m/ai-switch convert cc codex --dry-run
 ```
 
-## Quick start
+Install globally:
 
 ```sh
-ai-switch status                      # what's in this project?
-ai-switch convert cc codex --dry-run  # preview — writes nothing
-ai-switch convert cc codex --yes      # apply — backs up first
-ai-switch restore latest              # undo
+npm install -g @seungchan.m/ai-switch
 ```
 
-`cc` = Claude Code, `codex` = Codex. Reverse it with `convert codex cc`.
+Then use either binary:
+
+```sh
+swik status
+ai-switch status
+```
+
+`swik` is the short alias. `ai-switch` remains the full command.
+
+## Common Workflows
+
+### Claude Code to Codex
+
+Preview first:
+
+```sh
+swik audit
+swik convert cc codex --compile --dry-run
+```
+
+Apply after reviewing the plan:
+
+```sh
+swik convert cc codex --compile --yes
+```
+
+Use `--compile` when you want Claude's instruction hierarchy folded into `AGENTS.md`:
 
 ```text
-$ ai-switch convert cc codex --dry-run
+CLAUDE.md
+.claude/CLAUDE.md
+.claude/rules/*.md
+safe @include files
+```
+
+### Codex to Claude Code
+
+```sh
+swik convert codex cc --dry-run
+swik convert codex cc --yes
+```
+
+### Undo a Migration
+
+```sh
+swik backups
+swik restore latest
+```
+
+### Create a Handoff File
+
+```sh
+swik handoff --stdout
+swik handoff --from codex --to cc
+swik handoff
+```
+
+`handoff` creates `CODEX-HANDOFF.md` from git metadata only. It does not read raw chat, sessions, or file contents.
+
+### Home-Level Config
+
+Use `--global` only when you intentionally want to inspect or migrate `~/.claude` / `~/.codex` allowlisted config:
+
+```sh
+swik status --global
+swik convert cc codex --global --dry-run
+swik convert cc codex --global --yes
+swik restore latest --global
+```
+
+## What It Moves
+
+| Surface | Claude Code | Codex | Notes |
+| --- | --- | --- | --- |
+| Instructions | `CLAUDE.md` | `AGENTS.md` | `--compile` can fold Claude's hierarchy into one file |
+| MCP servers | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` | stdio and HTTP URL servers; auth reviewed manually |
+| Skills | `.claude/skills/` | `.agents/skills/` | copied as local skill folders |
+
+Out of scope by design:
+
+- accounts and login state
+- remote chat history and private sessions
+- API keys and literal secret values
+- Claude-only surfaces with no clean Codex equivalent
+
+## Example Output
+
+```text
+$ swik convert cc codex --compile --dry-run
 create   AGENTS.md
 create   .codex/config.toml
 copy     .claude/skills -> .agents/skills
 report   ai-switch-report.md
 ```
 
-## What it moves
-
-| Surface | Claude Code | Codex |
-| --- | --- | --- |
-| Instructions | `CLAUDE.md` | `AGENTS.md` |
-| MCP servers | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` |
-| Skills | `.claude/skills/` | `.agents/skills/` (+ `.codex/skills/`) |
-
-Out of scope by design: accounts, sessions, remote chat history, API keys / secret values.
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `status` | Summary of the current project (add `--global` for `~/.claude`, `~/.codex`) |
-| `detect` | Machine-readable JSON of detected files |
-| `audit` | Classify every Claude surface as migrated / manual / not-portable |
-| `doctor` | Report problems and warnings |
-| `convert <from> <to>` | Migrate config (`cc` ↔ `codex`). Flags: `--dry-run`, `--yes`, `--force`, `--compile`, `--global` |
-| `handoff` | Write a `CODEX-HANDOFF.md` scaffold from git state — never raw chat |
-| `backups` | List timestamped backups |
-| `restore <latest\|timestamp>` | Restore a backup and undo a migration |
-
 ```text
-$ ai-switch status
-Claude Code  CLAUDE.md, 2 MCP servers (.mcp.json), 1 skill
-Codex        no AGENTS.md, no MCP config, no skills
+$ swik audit
+Migrated automatically:
+  ✓ CLAUDE.md — root instructions → AGENTS.md
+  ✓ MCP servers — 2 server(s) (stdio/http) → .codex/config.toml
+  ✓ .claude/skills — → .agents/skills
+
+Needs manual migration:
+  ! .claude/agents — 1 custom agent(s) use tools/model/hooks; rebuild in Codex manually
+  ! .claude/settings.json — non-MCP keys not migrated: hooks, permissions
+
+Not portable:
+  ✗ .claude/output-styles — no Codex equivalent
 ```
 
-## Safety model
+## Command Reference
+
+| Command | Copy-paste example |
+| --- | --- |
+| Inspect project | `swik status` |
+| Machine-readable detection | `swik detect` |
+| Full Claude surface audit | `swik audit` |
+| Health check | `swik doctor` |
+| Preview Claude Code -> Codex | `swik convert cc codex --compile --dry-run` |
+| Apply Claude Code -> Codex | `swik convert cc codex --compile --yes` |
+| Preview Codex -> Claude Code | `swik convert codex cc --dry-run` |
+| Apply Codex -> Claude Code | `swik convert codex cc --yes` |
+| List backups | `swik backups` |
+| Restore latest backup | `swik restore latest` |
+| Generate handoff | `swik handoff` |
+| Print handoff only | `swik handoff --stdout` |
+| Global status | `swik status --global` |
+
+Provider aliases:
+
+```text
+cc = claude = claude-code
+codex = codex
+```
+
+Useful flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--dry-run` | preview changes and write nothing |
+| `--yes` | allow a migration to write files |
+| `--force` | allow overwriting files that are otherwise protected |
+| `--compile` | synthesize Claude's instruction hierarchy into `AGENTS.md` |
+| `--include-local` | include `CLAUDE.local.md` during `--compile` |
+| `--global` | operate on allowlisted home-level config |
+| `--stdout` | print handoff content instead of writing it |
+
+## Safety Model
 
 Conservative by default:
 
 - `--dry-run` prints the plan and writes nothing.
 - Migration writes require `--yes`.
-- Existing files are **not** overwritten without `--force`.
+- Existing files are not overwritten without `--force`.
 - Every migration snapshots originals to `.ai-switch-backups/<timestamp>/` (gitignored).
-- `restore latest` reverts a migration — restoring originals, removing files it created — and refuses to delete migration-created files you've since edited (unless `--force`).
+- `restore latest` restores originals and removes files created by the migration.
+- Restore refuses to delete migration-created files you edited after migration unless you pass `--force`.
 
-`.codex/config.toml` is the one exception to the overwrite rule: migrations preserve existing content and only **append** new, non-conflicting MCP servers.
+`.codex/config.toml` is the only overwrite-rule exception: migrations preserve existing content and only append new, non-conflicting MCP servers.
 
-## Global config
+## Credentials and Secrets
 
-Project conversions run from a repo directory. Home-level (`~/.claude`, `~/.codex`) config has its own explicit `--global` flag:
+MCP servers often need API keys or tokens. ai-switch migrates the wiring — server names, commands, args, and env-var names — but never copies secret values into the other tool's config or the report.
 
-```sh
-ai-switch status --global
-ai-switch convert cc codex --global --dry-run
-ai-switch convert cc codex --global --yes
-ai-switch restore latest --global
-```
+If the source config has a literal env value, ai-switch rewrites it as a `$NAME` reference in the target config and lists that variable in `ai-switch-report.md`.
 
-`--global` is **allowlist-only**: it touches just `CLAUDE.md`/`AGENTS.md`, `settings.json#mcpServers`/`config.toml#mcp_servers`, and `skills/`. It never reads or writes `auth.json`, `sessions/`, `state_*.sqlite`, logs, or caches. It follows `CLAUDE_CONFIG_DIR` / `CODEX_HOME` when set. Global backups live in `~/.ai-switch/backups/global/`.
+Backups preserve original files for exact rollback. If your source config already contains literal secrets, the local backup may contain them too. Project backups live in `.ai-switch-backups/`; global backups live in `~/.ai-switch/backups/global/`. Both are gitignored.
 
-## Support matrix
+## Compile Instructions
 
-| Feature | cc → codex | codex → cc |
-| --- | --- | --- |
-| Project instructions | Yes | Yes |
-| Stdio MCP servers | Yes | Yes |
-| HTTP MCP servers (`url`) | Yes (auth manual) | Yes (auth manual) |
-| Local skills | Yes (copied) | Yes (copied) |
-| Duplicate MCP names | skipped | — |
-| Account / session data | No | No |
-| Remote chat history | No | No |
-| Global config | Yes (`--global`) | Yes (`--global`) |
+By default, `cc -> codex` copies only the root `CLAUDE.md`.
 
-### How conversion maps
-
-**Claude Code → Codex**
-- `CLAUDE.md` → `AGENTS.md`
-- `.claude/settings.json#mcpServers` or `.mcp.json#mcpServers` → `.codex/config.toml`
-- stdio servers → `command`/`args`/`env`; HTTP (`type: http`, `url`) → a Codex `url` server (auth headers flagged for manual setup)
-- MCP names already in `.codex/config.toml` → skipped (no duplicate sections)
-- `.claude/skills` → `.agents/skills`
-
-**Codex → Claude Code**
-- `AGENTS.md` → `CLAUDE.md`
-- `.codex/config.toml` MCP sections → `.mcp.json`; stdio → `command`/`args`/`env`, `url` → `{ "type": "http", "url" }` (bearer/header auth flagged for manual setup)
-- `.codex/skills` **and** `.agents/skills` → `.claude/skills`
-
-## Credentials & secrets
-
-MCP servers need secrets (API keys, tokens). ai-switch migrates the **wiring** — server names, commands, args, and env-var *names* — but never copies secret **values** into the other tool's config or the report. Any literal value in the source is **rewritten as a `$NAME` reference** and listed in `ai-switch-report.md`, so you set the same env vars for the new tool (and rotate them if they leaked).
-
-> **Backups vs. secrets.** Backups preserve your **original** files so `restore` reverts exactly. If your *source* config already contains literal secrets, the local backup (`.ai-switch-backups/`, `~/.ai-switch/backups/global/`; both gitignored) may contain them too. The report always notes this. The guarantee: ai-switch never writes a literal value into the *other tool's* config or the report.
-
-## `--compile`: flatten the instruction hierarchy
-
-By default `cc → codex` copies only the root `CLAUDE.md`. But Claude Code loads a *hierarchy*: `CLAUDE.md` + `.claude/CLAUDE.md` + `.claude/rules/*.md` + `@`-imports. `--compile` synthesizes all of it into one `AGENTS.md`, each part under a `## From <source>` header:
+With `--compile`, ai-switch writes a traceable `AGENTS.md` with source labels:
 
 ```sh
-ai-switch convert cc codex --compile --dry-run
-ai-switch convert cc codex --compile --yes
-ai-switch convert cc codex --compile --include-local --yes   # also fold in CLAUDE.local.md
+swik convert cc codex --compile --dry-run
+swik convert cc codex --compile --yes
+swik convert cc codex --compile --include-local --yes
 ```
 
-`@path` lines are inlined with `<!-- included from … -->` markers. Safe by default: `CLAUDE.local.md` is excluded unless `--include-local`; an include is only inlined if it's a repo-relative text file (`.md/.txt/.json/.yaml/.yml/.toml`) under 40KB (200KB total). Absolute/`~` paths, missing files, wrong types, and circular includes are left in place and reported — never silently dropped.
+The compiled output includes sections like:
 
-## `handoff`: a safe context scaffold
+```md
+# Project Instructions
 
-`ai-switch handoff` writes a standalone `CODEX-HANDOFF.md` for the next agent. It **never** reads raw chat, sessions, or file contents — only git-derived project state, plus structured blanks for the human context git can't know.
+Compiled from Claude Code by ai-switch (--compile).
+
+## From CLAUDE.md
+...
+
+## From .claude/rules/style.md
+...
+```
+
+Safe `@path` includes are inlined with source markers. Absolute paths, `~` paths, missing files, unsupported file types, oversized files, and circular includes are kept in place and reported.
+
+## Handoff
+
+`swik handoff` writes a standalone `CODEX-HANDOFF.md` scaffold for the next agent:
 
 ```sh
-ai-switch handoff                       # write CODEX-HANDOFF.md
-ai-switch handoff --stdout              # print instead of writing
-ai-switch handoff --from codex --to cc  # label the direction
+swik handoff
+swik handoff --stdout
+swik handoff --from codex --to cc
 ```
 
-Auto-filled from git: current branch, changed files (`git status`), diff summary (`git diff --stat`), recent commits (`git log --oneline`). Left blank: goal, decisions, open TODO, how to test, known risks, notes. `--from`/`--to` only label the scaffold; they never change what git data is collected. Existing files aren't overwritten without `--force`, `AGENTS.md` is never a target, and only the project basename is recorded — not your absolute path.
+Auto-filled from git:
 
-## Scope & audit
+- current branch
+- changed files from `git status`
+- diff summary from `git diff --stat`
+- recent commits from `git log --oneline`
 
-ai-switch migrates three surfaces — **instructions, MCP servers, skills**. Claude Code has more (`.claude/agents`, `.claude/commands`, settings `hooks`/`permissions`, output styles…) with no clean one-to-one Codex equivalent. Rather than pretend, `audit` lists everything it finds and classifies it:
+Left blank for you:
 
-```text
-$ ai-switch audit
-Migrated automatically:
-  ✓ CLAUDE.md — root instructions → AGENTS.md
-  ✓ MCP servers — 2 server(s) (stdio/http) → .codex/config.toml
-  ✓ .claude/skills — → .agents/skills
-Needs manual migration:
-  ! .claude/agents — 1 custom agent(s) use tools/model/hooks; rebuild in Codex manually
-  ! .claude/settings.json — non-MCP keys not migrated: hooks, permissions
-Not portable:
-  ✗ .claude/output-styles — no Codex equivalent
-```
+- goal
+- decisions
+- open TODO
+- how to test
+- known risks
+- notes
 
-Every migration report includes the same **"Other Claude surfaces detected"** section, so a conversion never silently looks complete when it isn't.
+Only the project basename is recorded, not your absolute local path.
 
 ## Limitations
 
-- Auto MCP conversion covers stdio (`command`/`args`/`env`) and HTTP (`url`) servers; auth headers/bearer tokens are flagged for manual setup, not copied.
-- Raw chat history and private sessions are never migrated — use `handoff` for a safe git-derived scaffold instead.
+- Auto MCP conversion covers stdio (`command`/`args`/`env`) and HTTP (`url`) servers.
+- Auth headers and bearer tokens are flagged for manual setup, not copied.
+- Claude custom agents, commands, hooks, permissions, and output styles are reported rather than pretended to be portable.
+- Raw chat history and private sessions are never migrated.
 - `--global` is allowlist-only and never touches auth/session/state/log/cache files.
 
 ## Roadmap
@@ -198,7 +271,7 @@ Every migration report includes the same **"Other Claude surfaces detected"** se
 
 ## Contributing
 
-Issues and PRs welcome. Built from **public behavior and documented file formats only** — please don't add proprietary, leaked, or reverse-engineered source. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+Issues and PRs welcome. Built from public behavior and documented file formats only. Please do not add proprietary, leaked, or reverse-engineered source. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 
