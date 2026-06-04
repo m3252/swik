@@ -1,7 +1,7 @@
 {
   "name": "@seungchan.m/ai-switch",
-  "version": "0.7.0",
-  "description": "Switch project instructions, MCP settings, and skills between AI coding agents.",
+  "version": "0.7.1",
+  "description": "Migrate project config between Claude Code and Codex — CLAUDE.md/AGENTS.md, MCP servers, and skills. Reversible, with backups.",
   "type": "module",
   "repository": {
     "type": "git",
@@ -30,11 +30,20 @@
     "test": "node --test"
   },
   "keywords": [
-    "codex",
     "claude-code",
+    "codex",
+    "openai-codex",
+    "codex-cli",
+    "anthropic",
+    "claude-md",
+    "agents-md",
     "mcp",
+    "mcp-server",
     "ai-agent",
-    "migration"
+    "migration",
+    "cli",
+    "developer-tools",
+    "devtools"
   ],
   "license": "MIT",
   "engines": {

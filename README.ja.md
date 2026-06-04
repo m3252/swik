@@ -1,219 +1,170 @@
 # ai-switch
 
-[English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
-
-> **Claude Code** と **Codex** の間で、プロジェクトのエージェント設定 —— 指示・MCP サーバー・スキル —— を安全かつ元に戻せる形で移行します。
+> **Claude Code** ↔ **Codex** 間でプロジェクト設定を移行 —— `CLAUDE.md`/`AGENTS.md`、MCP サーバー、スキル。バックアップ付きで、元に戻せます。
 
 [![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-新しいスマホに替えるとき、移行アプリが連絡先や設定を引き継いでくれます。`ai-switch` は AI コーディングツールに対して同じことをします。Claude Code と Codex を行き来する際、手作業で作り直すことになる**プロジェクトレベルの設定**を移行します。
+[English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
 
-アカウント・セッション・チャット履歴・プロジェクト外のシークレットには一切触れず、すべての変更はバックアップされ、元に戻せます。
+Claude Code と Codex を行き来するたびに手で作り直すことになる**プロジェクト単位の設定**を運ぶ、依存ゼロの CLI です。すべての書き込みはバックアップされ、すべての実行は `--dry-run` でプレビューでき、安全に自動変換できないものは**捨てずにレポート**します。
 
----
+アカウント、セッション、チャット履歴、シークレット値には一切触れません。
 
 ## なぜ必要か
 
-AI コーディングツールはほぼ毎週のように進化しています。今日いちばん良いツールが来月もそうとは限りません。慣れているという理由だけで使い慣れたツールに固執するのは、新しいツールがもたらす生産性向上を毎回取りこぼすことを意味します。賢い選択は、最初に覚えたツールではなく*いま最も良いツール*を使うことです。
+AI コーディングツールはほぼ毎週改善されます。今日あるタスクに最適なツールが、来月も最適とは限りません —— 慣れているからと使い続けると、新しいツールが解き放つ生産性を静かに取りこぼします。生産性を最大化するには、最初に覚えたものではなく、*今*手に入る最良のツールを使うことです。
 
-乗り換えをためらわせる唯一の理由は、毎回**設定を手作業で作り直す**必要があることです —— 指示・MCP サーバー・スキルを一つずつ。この摩擦こそが、あなたを一つのツールに縛りつけています。
+切り替えを苦痛にするのは、毎回**設定を手で作り直す**こと —— 指示、MCP サーバー、スキル。その摩擦こそが本当のロックインです。
 
-`ai-switch` は設定を持ち運び可能にすることで、その摩擦を取り除きます。1 つのコマンドで変換し、たまたま設定済みのツールではなく最も良いツールに従いましょう。今週は新しいものを試し、来週は戻り、プロジェクトごとに両方を使うのも自由です。安全に自動変換できない項目は黙って捨てず、**手動レビュー項目としてレポート**します。
+`ai-switch` は設定を可搬にしてその摩擦を取り除きます。1 コマンドで変換し、たまたま設定したツールではなく最良のツールに従いましょう。今週は新しいものを試し、来週は戻し、プロジェクトごとに両方使うこともできます。安全に自動変換できないものは手動レビュー用にレポートされ、静かに捨てられることはありません。
 
-## 何を移行するか
+## インストール
 
-| 種類 | Claude Code | Codex |
+```sh
+npm install -g @seungchan.m/ai-switch   # Node 20+
+
+# またはインストールせず一度だけ実行:
+npx @seungchan.m/ai-switch status
+```
+
+## クイックスタート
+
+```sh
+ai-switch status                      # このプロジェクトには何がある?
+ai-switch convert cc codex --dry-run  # プレビュー —— 何も書き込まない
+ai-switch convert cc codex --yes      # 適用 —— まずバックアップ
+ai-switch restore latest              # 取り消し
+```
+
+`cc` = Claude Code、`codex` = Codex。`convert codex cc` で逆方向に。
+
+```text
+$ ai-switch convert cc codex --dry-run
+create   AGENTS.md
+create   .codex/config.toml
+copy     .claude/skills -> .agents/skills
+report   ai-switch-report.md
+```
+
+## 移行する対象
+
+| 領域 | Claude Code | Codex |
 | --- | --- | --- |
 | 指示 | `CLAUDE.md` | `AGENTS.md` |
 | MCP サーバー | `.mcp.json`、`.claude/settings.json` | `.codex/config.toml` |
 | スキル | `.claude/skills/` | `.agents/skills/`（+ `.codex/skills/`） |
 
-**対象外（意図的）：** アカウント、セッション、リモートのチャット履歴、API キー/シークレット。
+設計上の対象外: アカウント、セッション、リモートチャット履歴、API キー / シークレット値。
 
-## クイックスタート
+## コマンド
 
-```sh
-# 現在のプロジェクトに何があるか確認
-ai-switch status
+| コマンド | 役割 |
+| --- | --- |
+| `status` | 現在のプロジェクトの要約（`--global` で `~/.claude`、`~/.codex`） |
+| `detect` | 検出したファイルを機械可読な JSON で出力 |
+| `audit` | すべての Claude 領域を migrated / manual / not-portable に分類 |
+| `doctor` | 問題と警告をレポート |
+| `convert <from> <to>` | 設定を移行（`cc` ↔ `codex`）。フラグ: `--dry-run`、`--yes`、`--force`、`--compile`、`--global` |
+| `handoff` | git の状態から `CODEX-HANDOFF.md` の雛形を生成 —— 生のチャットは含めない |
+| `backups` | タイムスタンプ付きバックアップ一覧 |
+| `restore <latest\|timestamp>` | バックアップを復元し移行を取り消す |
 
-# 移行のプレビュー（ファイルは書き込まない）
-ai-switch convert cc codex --dry-run
-
-# 適用（先にバックアップを作成）
-ai-switch convert cc codex --yes
-
-# やっぱりやめる？ ロールバック
-ai-switch restore latest
+```text
+$ ai-switch status
+Claude Code  CLAUDE.md, 2 MCP servers (.mcp.json), 1 skill
+Codex        no AGENTS.md, no MCP config, no skills
 ```
 
-プロジェクト変換はホームディレクトリ（`~`）ではなく、実際のリポジトリ/プロジェクトディレクトリで実行してください。ホームレベル（グローバル）設定には専用の `--global` フラグがあります：
+## 安全モデル
+
+デフォルトは保守的です:
+
+- `--dry-run` は計画を表示するだけで何も書き込みません。
+- 移行の書き込みには `--yes` が必要です。
+- 既存ファイルは `--force` なしには**上書きしません**。
+- すべての移行で元ファイルを `.ai-switch-backups/<timestamp>/` にスナップショットします（gitignore 済み）。
+- `restore latest` は移行を取り消します —— 元を復元し、生成したファイルを削除 —— そしてその後あなたが編集した生成ファイルは（`--force` なしには）削除を拒否します。
+
+`.codex/config.toml` は上書きルールの唯一の例外です。移行は既存の内容を保ち、衝突しない MCP サーバーだけを**追記**します。
+
+## グローバル設定
+
+プロジェクト変換はリポジトリのディレクトリで実行します。ホームレベル（`~/.claude`、`~/.codex`）の設定には独立した明示的な `--global` フラグを使います:
 
 ```sh
 ai-switch status --global
 ai-switch convert cc codex --global --dry-run
 ai-switch convert cc codex --global --yes
-ai-switch backups --global
 ai-switch restore latest --global
 ```
 
-グローバル convert は **allowlist 限定**です：`CLAUDE.md`/`AGENTS.md`、`settings.json#mcpServers`/`config.toml#mcp_servers`、`skills/` のみを扱います。`auth.json`、`sessions/`、`state_*.sqlite`、ログ、キャッシュは決して読み書きしません。グローバルバックアップは `~/.ai-switch/backups/global/` に保存されます。
-
-開発中は Node または Bun で直接実行できます：
-
-```sh
-node ./src/cli.js status
-bun run src/cli.js convert cc codex --dry-run
-```
-
-インストール：
-
-```sh
-npm install -g @seungchan.m/ai-switch   # Node 20+ が必要
-bunx @seungchan.m/ai-switch             # Bun が必要
-```
-
-## コマンド
-
-| コマンド | 内容 |
-| --- | --- |
-| `status` | 現在のプロジェクトの読みやすい要約 |
-| `status --global` | ホームレベル設定（`~/.claude`、`~/.codex`）の読み取り専用の要約 |
-| `detect` | 検出ファイルの機械可読 JSON |
-| `audit` | すべての Claude サーフェスを 自動移行/手動/移行不可 に分類 |
-| `doctor` | 問題と警告を診断 |
-| `handoff` | git 状態から `CODEX-HANDOFF.md` のスキャフォールドを作成（生チャットは読まない） |
-| `convert <from> <to>` | 設定を移行（`cc` ↔ `codex`）。`--dry-run`、`--yes`、`--force` を付加可能 |
-| `backups` | タイムスタンプ付きバックアップの一覧 |
-| `restore latest \| <timestamp>` | バックアップを復元し移行を元に戻す |
-
-`status` の出力例：
-
-```text
-Claude Code  CLAUDE.md, 2 MCP servers (.mcp.json), 1 skill
-Codex        no AGENTS.md, no MCP config, no skills
-```
-
-グローバル status は `CLAUDE_CONFIG_DIR` / `CODEX_HOME` が設定されている場合、`~/.claude`・`~/.codex` を前提とせずそれらの場所に従います。
-
-## 例
-
-同梱の例でプレビュー —— dry run は何も書き込む前に、何が起こるかを正確に表示します：
-
-```sh
-node src/cli.js convert cc codex --dry-run --cwd examples/claude-project
-```
-
-```text
-create        AGENTS.md
-create        .codex/config.toml
-copy          .claude/skills -> .agents/skills
-report        ai-switch-report.md
-```
-
-例には stdio MCP サーバーと HTTP MCP サーバーが含まれ —— どちらも自動移行されます（stdio → `command`、HTTP → `url`）。env 値の 1 つがリテラルのため、CLI はローカルバックアップがその値を保持する旨の警告も表示します。
-
-## 安全モデル
-
-`ai-switch` はデフォルトで保守的です：
-
-- 🔍 `--dry-run` は計画を表示するだけで何も書き込まない
-- ✋ 移行の書き込みには `--yes` が必要
-- 🛡️ 既存ファイルは `--force` なしでは**上書きしない**
-- 📝 `handoff` は `CODEX-HANDOFF.md`（または `--output`）だけを書き込み、`--force` なしでは上書きしない
-- 💾 移行の書き込みは `.ai-switch-backups/<timestamp>/` にスナップショット
-- ↩️ `restore latest` は移行を元に戻す —— 元ファイルを復元し、作成したファイルを削除
-- 🚫 移行で作成したファイルをその後編集した場合、`--force` なしでは削除を拒否
-
-`.codex/config.toml` は上書きルールの唯一の例外です。移行は既存の内容を保持し、競合しない新しい MCP サーバーのみを追記します。
+`--global` は**許可リストのみ**です。`CLAUDE.md`/`AGENTS.md`、`settings.json#mcpServers`/`config.toml#mcp_servers`、`skills/` だけを触ります。`auth.json`、`sessions/`、`state_*.sqlite`、ログ、キャッシュは読みも書きもしません。設定時は `CLAUDE_CONFIG_DIR` / `CODEX_HOME` に従います。グローバルバックアップは `~/.ai-switch/backups/global/` にあります。
 
 ## サポート表
 
 | 機能 | cc → codex | codex → cc |
 | --- | --- | --- |
-| プロジェクト指示 | ✅ | ✅ |
-| Stdio MCP サーバー | ✅ | ✅ |
-| HTTP MCP サーバー（`url`） | ✅ url（auth は手動） | ✅ url（auth は手動） |
-| ローカルスキル | ✅ コピー | ✅ コピー |
-| 重複する MCP 名 | ⏭️ スキップ | — |
-| アカウント / セッションデータ | ❌ | ❌ |
-| リモートのチャット履歴 | ❌ | ❌ |
-| ユーザーレベルのグローバル設定 | ✅ `--global`（allowlist） | ✅ `--global`（allowlist） |
+| プロジェクト指示 | あり | あり |
+| Stdio MCP サーバー | あり | あり |
+| HTTP MCP サーバー（`url`） | あり（認証は手動） | あり（認証は手動） |
+| ローカルスキル | あり（コピー） | あり（コピー） |
+| 重複する MCP 名 | スキップ | — |
+| アカウント / セッションデータ | なし | なし |
+| リモートチャット履歴 | なし | なし |
+| グローバル設定 | あり（`--global`） | あり（`--global`） |
 
-## 変換マッピング
+### 変換マッピング
 
 **Claude Code → Codex**
 - `CLAUDE.md` → `AGENTS.md`
 - `.claude/settings.json#mcpServers` または `.mcp.json#mcpServers` → `.codex/config.toml`
-- stdio サーバー → `command`/`args`/`env`；HTTP サーバー（`type: http`、`url`）→ Codex の `url` サーバー（auth ヘッダーは手動設定としてフラグ）
-- `.codex/config.toml` に既にある MCP 名 → スキップ（重複 TOML セクションを回避）
-- `.claude/skills` → `.agents/skills`（Codex の現行スキル位置）
+- stdio サーバー → `command`/`args`/`env`；HTTP（`type: http`、`url`） → Codex の `url` サーバー（認証ヘッダーは手動設定として明示）
+- `.codex/config.toml` に既にある MCP 名 → スキップ（重複セクションなし）
+- `.claude/skills` → `.agents/skills`
 
 **Codex → Claude Code**
 - `AGENTS.md` → `CLAUDE.md`
-- `.codex/config.toml` の MCP セクション → `.mcp.json`
-- stdio → `command`/`args`/`env`、`url` サーバー → `{ "type": "http", "url" }`（bearer/ヘッダー auth は手動設定としてフラグ）
-- `.codex/skills` **および** `.agents/skills` → `.claude/skills`
+- `.codex/config.toml` の MCP セクション → `.mcp.json`；stdio → `command`/`args`/`env`、`url` → `{ "type": "http", "url" }`（bearer/ヘッダー認証は手動設定として明示）
+- `.codex/skills` **と** `.agents/skills` → `.claude/skills`
 
-## 認証情報
+## 認証情報とシークレット
 
-MCP サーバーは通常シークレット（API キー、トークン）を必要とします。ai-switch は**配線** —— サーバー名・command・args・env 変数の*名前* —— のみを移行し、シークレットの**値**はツール間にもレポートにも決してコピーしません。移行後、`ai-switch-report.md` が移行済みサーバーに必要な認証情報の一覧を示すので、同じ環境変数を新しいツールに設定するだけで済みます。移行後の設定では、リテラル値は**`$NAME` 参照に書き換えられ**（値自体はターゲット設定にもレポートにも決してコピーされません）、レポートに一覧化されるので、環境変数に設定し、シークレットだった場合はローテーションしてください。
+MCP サーバーにはシークレット（API キー、トークン）が必要です。ai-switch が移行するのは**配線**だけ —— サーバー名、コマンド、引数、環境変数の*名前*。シークレットの**値**を他ツールの設定やレポートにコピーすることは決してありません。ソース内のリテラル値は **`$NAME` 参照に書き換えて** `ai-switch-report.md` に列挙するので、新しいツールに同じ環境変数を設定すれば動きます（漏れていたなら必ずローテーションを）。
 
-> **バックアップとシークレット。** バックアップは `restore` が正確に元へ戻せるよう、**元の** allowlist ファイルを保持します。*ソース*設定に既にリテラルのシークレットがある場合、ローカルバックアップ（プロジェクト: `.ai-switch-backups/`、グローバル: `~/.ai-switch/backups/global/`；いずれも gitignore 済み）にもそれが含まれることがあります。レポートは常にこれを記載し、CLI はさらにリテラルの **env 値**がある場合に警告します（HTTP auth ヘッダーは手動設定として別途フラグ）。保証するのは、ai-switch がリテラル値を*別ツール*の設定やレポートに決して書き込まないことです。
+> **バックアップとシークレット。** バックアップは**元の**ファイルを保持し、`restore` が正確に戻せるようにします。もし*ソース*設定に既にリテラルのシークレットがあれば、ローカルバックアップ（`.ai-switch-backups/`、`~/.ai-switch/backups/global/`；どちらも gitignore 済み）にも含まれ得ます。レポートは必ずこれを注記します。保証: ai-switch は*他ツールの*設定やレポートにリテラル値を決して書きません。
 
-> ai-switch が移行するのは**永続的なエージェント指示と MCP 配線**であり、生のチャット履歴・プライベートセッション・シークレット値ではありません。
+## `--compile`: 指示の階層を平坦化
 
-## 指示階層のコンパイル（`--compile`）
-
-デフォルトの `cc → codex` 変換は、ルートの `CLAUDE.md` だけを `AGENTS.md` にコピーします。一方 Claude Code は実際には `CLAUDE.md` + `.claude/CLAUDE.md` + `.claude/rules/*.md` + `@` include の階層を読み込みます。`--compile` を使うと、それらを 1 つの `AGENTS.md` に合成し、各部分を `## From <source>` 見出しの下に置いて出典を追跡できるようにします：
+デフォルトの `cc → codex` はルートの `CLAUDE.md` だけをコピーします。しかし Claude Code が読み込むのは*階層*です: `CLAUDE.md` + `.claude/CLAUDE.md` + `.claude/rules/*.md` + `@`-インポート。`--compile` はそのすべてを 1 つの `AGENTS.md` に合成し、各部分を `## From <source>` 見出しの下に置きます:
 
 ```sh
 ai-switch convert cc codex --compile --dry-run
 ai-switch convert cc codex --compile --yes
-ai-switch convert cc codex --compile --include-local --yes   # CLAUDE.local.md も含める
+ai-switch convert cc codex --compile --include-local --yes   # CLAUDE.local.md も取り込む
 ```
 
-- `@path` 行は `<!-- included from … -->` マーカー付きでインライン展開されます。
-- **デフォルトは安全優先:** `CLAUDE.local.md` は `--include-local` を渡した場合だけ含まれます。include はプロジェクト内のテキストファイル（`.md/.txt/.json/.yaml/.yml/.toml`）で、単一ファイル 40KB 以下、合計 200KB 以下の場合のみインライン展開されます。絶対パス/`~` パス、欠落ファイル、不正な種類、循環 include は**元の行を残し、手動確認としてレポート**されます。
-- `--compile` を使わないデフォルト変換の動作は変わりません。
+`@path` 行は `<!-- included from … -->` マーカー付きでインライン展開されます。デフォルトは安全です: `--include-local` なしでは `CLAUDE.local.md` を除外。インライン展開は 40KB 未満（合計 200KB）のリポジトリ相対テキストファイル（`.md/.txt/.json/.yaml/.yml/.toml`）の場合のみ。絶対/`~` パス、存在しないファイル、誤った型、循環インポートはそのまま残してレポートします —— 静かに捨てません。
 
-## handoff スキャフォールド（`handoff`）
+## `handoff`: 安全なコンテキスト雛形
 
-`ai-switch handoff` は、次のエージェント向けに独立した `CODEX-HANDOFF.md` を作成します。生のチャット履歴、セッション、ファイル内容は**読みません**。git から安全に導けるプロジェクト状態だけを埋め、git では分からない人間側の文脈は構造化された空欄として残します：
+`ai-switch handoff` は次の agent のための独立した `CODEX-HANDOFF.md` を作ります。生のチャット・セッション・ファイル内容は**決して**読みません —— git 由来のプロジェクト状態と、git には分からない人間のコンテキスト用の空欄だけを埋めます。
 
 ```sh
-ai-switch handoff
-ai-switch handoff --stdout
-ai-switch handoff --from codex --to cc
-ai-switch handoff --output docs/CODEX-HANDOFF.md
-ai-switch handoff --force
+ai-switch handoff                       # CODEX-HANDOFF.md を書き出す
+ai-switch handoff --stdout              # 書かずに出力
+ai-switch handoff --from codex --to cc  # 方向をラベル付け
 ```
 
-任意の `--from`/`--to` フラグ（`cc` または `codex`）は handoff の方向を示すラベルであり、収集する git データは変わりません。
+git から自動入力: 現在のブランチ、変更ファイル（`git status`）、diff 要約（`git diff --stat`）、最近のコミット（`git log --oneline`）。空欄: 目標、決定事項、未着手 TODO、テスト方法、既知のリスク、メモ。`--from`/`--to` は雛形にラベルを付けるだけで、収集する git データは変えません。既存ファイルは `--force` なしには上書きせず、`AGENTS.md` を対象にすることはなく、絶対パスではなくプロジェクトの basename だけを記録します。
 
-git から自動入力：
+## 範囲と audit
 
-- 現在のブランチ
-- `git status` による変更ファイル
-- `git diff --stat` による diff 要約
-- `git log --oneline` による最近のコミット
-
-空欄として残すもの：
-
-- 目標
-- 決定事項
-- 未完了 TODO
-- テスト方法
-- 既知のリスク
-- 次のエージェントへのメモ
-
-デフォルト出力はプロジェクトルートの `CODEX-HANDOFF.md` です。既存ファイルは `--force` なしでは上書きせず、`AGENTS.md` を handoff 対象にすることはありません。デフォルトでは、handoff には絶対ローカルパスではなくプロジェクト basename のみを記録します。
-
-## スコープ & audit
-
-ai-switch が移行するのは 3 つの面 —— **指示・MCP サーバー・スキル**です。Claude Code にはさらに多くの面（`.claude/CLAUDE.md`、`CLAUDE.local.md`、`.claude/rules`、`.claude/agents`、`.claude/commands`、settings の `hooks`/`permissions`/…）があり、Codex と 1 対 1 にきれいに対応しません。そう見せかける代わりに、`ai-switch audit` が見つけたすべてを分類して表示します：
+ai-switch が移行するのは 3 つの領域 —— **指示、MCP サーバー、スキル**。Claude Code にはもっと多くがあり（`.claude/agents`、`.claude/commands`、settings の `hooks`/`permissions`、output styles…）、Codex に綺麗な 1 対 1 の対応はありません。そう装う代わりに、`audit` は見つけたすべてを列挙して分類します:
 
 ```text
+$ ai-switch audit
 Migrated automatically:
   ✓ CLAUDE.md — root instructions → AGENTS.md
   ✓ MCP servers — 2 server(s) (stdio/http) → .codex/config.toml
@@ -225,30 +176,29 @@ Not portable:
   ✗ .claude/output-styles — no Codex equivalent
 ```
 
-すべての移行レポートにも **"Other Claude surfaces detected"** セクション（未移行のギャップ）が含まれ、変換が実際には未完了なのに完了したように見えないようにします。`doctor` はギャップがあるとき `audit` を案内します。
+すべての移行レポートにも同じ **「Other Claude surfaces detected」** セクションが入るので、まだ完了していないのに完了したように見えることはありません。
 
-## 制限事項
+## 制限
 
-- 自動 MCP 変換は stdio サーバー（`command`、`args`、`env`）と HTTP サーバー（`url`）に対応。HTTP サーバーの auth ヘッダー/ベアラートークンはコピーされず、`ai-switch-report.md` に手動設定項目として記載されます。
-- **生のチャット履歴とプライベートセッションは決して移行しません** —— コード・シークレット・個人情報が混在しうえ、ツール間で意味が通じません。代わりに `ai-switch handoff` で安全な git 由来のスキャフォールドを作成できます。
-- グローバル `--global` convert は allowlist 限定で、auth/session/state/log/cache ファイルには決して触れません。allowlist の拡張は意図的に保守的にしています。
+- 自動 MCP 変換は stdio（`command`/`args`/`env`）と HTTP（`url`）サーバーをカバーします。認証ヘッダー/bearer トークンは手動設定として明示され、コピーされません。
+- 生のチャット履歴とプライベートセッションは決して移行しません —— 代わりに `handoff` で安全な git 由来の雛形を使ってください。
+- `--global` は許可リストのみで、auth/session/state/log/cache ファイルには触れません。
 
 ## ロードマップ
 
-- ✅ 認証情報インベントリ —— 移行済み各 MCP サーバーが必要とする env 変数をレポート（0.2.0）
-- ✅ 複数行 TOML `args`/`env` の解析（0.2.0）
-- ✅ グローバル `convert --global`（allowlist 限定）—— ホームレベル設定（0.3.0）
-- ✅ `.agents/skills` 対応 + HTTP MCP `url` 変換（0.4.0）
-- ✅ `audit` —— Claude の表面を自動/手動/非ポータブルに分類（0.5.0）
-- ✅ `convert --compile` —— CLAUDE.md 階層（`.claude/rules`、`@` include）を AGENTS.md に合成（0.6.0）
-- ✅ `handoff` —— 次のエージェント向けに簡潔なプロジェクト文脈のスキャフォールドをエクスポート（生のチャットではない）（0.7.0）
-- Gemini CLI、Cursor 向けアダプター
-- Codex TOML 書き込み時にコメントと未知のフィールドを保持
-- オプトインの `--include-env-values`（シークレット値のコピー、明確な危険警告の後ろ）
+- [x] 認証情報インベントリ + 複数行 TOML 解析（0.2.0）
+- [x] グローバル `convert --global`、許可リストのみ（0.3.0）
+- [x] `.agents/skills` + HTTP MCP `url` 変換（0.4.0）
+- [x] `audit` —— 領域を migrated / manual / not-portable に分類（0.5.0）
+- [x] `convert --compile` —— CLAUDE.md 階層の平坦化（0.6.0）
+- [x] `handoff` —— git 由来のコンテキスト雛形（0.7.0）
+- [ ] Gemini CLI と Cursor のアダプター
+- [ ] Codex TOML 書き込み時にコメント/未知フィールドを保持
+- [ ] 明示的な危険警告付きの opt-in `--include-env-values`
 
 ## コントリビュート
 
-Issue と PR を歓迎します。本プロジェクトは**公開された挙動と文書化されたファイル形式のみ**から構築されています —— 独自・流出・リバースエンジニアリングによるソースは追加しないでください。[CONTRIBUTING.md](CONTRIBUTING.md) と [SECURITY.md](SECURITY.md) を参照してください。
+Issue と PR を歓迎します。本プロジェクトは**公開された挙動と文書化されたファイル形式のみ**から作られています —— 専有・流出・リバースエンジニアリングされたソースは追加しないでください。[CONTRIBUTING.md](CONTRIBUTING.md) と [SECURITY.md](SECURITY.md) を参照してください。
 
 ## ライセンス
 
