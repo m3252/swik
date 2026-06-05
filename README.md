@@ -3,7 +3,7 @@
 > Move agent setup between **Claude Code** and **OpenAI Codex CLI**: instructions, MCP servers, and skills. Preview first, back up every write, restore when needed.
 
 [![CI](https://github.com/m3252/swik/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/swik/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/swik)](https://www.npmjs.com/package/swik)
+[![npm](https://img.shields.io/npm/v/@seungchan.m/swik)](https://www.npmjs.com/package/@seungchan.m/swik)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **English** · [한국어](docs/README.ko.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md)
@@ -15,14 +15,14 @@
 Run once without installing:
 
 ```sh
-npx swik status
-npx swik convert cc codex --dry-run
+npx @seungchan.m/swik status
+npx @seungchan.m/swik convert cc codex --dry-run
 ```
 
 Install globally:
 
 ```sh
-npm install -g swik
+npm install -g @seungchan.m/swik
 ```
 
 Then use `swik`:
@@ -32,7 +32,6 @@ swik status
 swik sync --compile --dry-run
 ```
 
-`swik` remains available as the full command, but examples use `swik` to avoid confusion with the unrelated unscoped npm package.
 
 ## Common Workflows
 

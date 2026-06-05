@@ -3,7 +3,7 @@
 > 在 **Claude Code** 与 **Codex** 之间移动项目配置：指令、MCP 服务器和技能。先预览，每次写入都备份，需要时可恢复。
 
 [![CI](https://github.com/m3252/swik/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/swik/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/swik)](https://www.npmjs.com/package/swik)
+[![npm](https://img.shields.io/npm/v/@seungchan.m/swik)](https://www.npmjs.com/package/@seungchan.m/swik)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 [English](../README.md) · [한국어](README.ko.md) · **中文** · [日本語](README.ja.md)
@@ -15,14 +15,14 @@
 无需安装，直接运行一次：
 
 ```sh
-npx swik status
-npx swik convert cc codex --dry-run
+npx @seungchan.m/swik status
+npx @seungchan.m/swik convert cc codex --dry-run
 ```
 
 全局安装：
 
 ```sh
-npm install -g swik
+npm install -g @seungchan.m/swik
 ```
 
 安装后使用 `swik`：
@@ -32,7 +32,6 @@ swik status
 swik sync --compile --dry-run
 ```
 
-完整命令 `swik` 仍然可用，但文档示例优先使用 `swik`，以减少与非作用域 npm 包的混淆。
 
 ## 常用流程
 

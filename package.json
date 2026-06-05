@@ -1,6 +1,6 @@
 {
-  "name": "swik",
-  "version": "0.8.3",
+  "name": "@seungchan.m/swik",
+  "version": "0.8.4",
   "description": "Migrate agent setup between Claude Code and OpenAI Codex CLI — CLAUDE.md/AGENTS.md, MCP servers, and skills. Safe and reversible.",
   "type": "module",
   "repository": {

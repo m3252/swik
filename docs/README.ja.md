@@ -3,7 +3,7 @@
 > **Claude Code** と **Codex** の間でプロジェクト設定を移動します: 指示、MCP サーバー、スキル。まずプレビューし、書き込みは毎回バックアップし、必要なら復元できます。
 
 [![CI](https://github.com/m3252/swik/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/swik/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/swik)](https://www.npmjs.com/package/swik)
+[![npm](https://img.shields.io/npm/v/@seungchan.m/swik)](https://www.npmjs.com/package/@seungchan.m/swik)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 [English](../README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
@@ -15,14 +15,14 @@
 インストールせずに一度だけ実行:
 
 ```sh
-npx swik status
-npx swik convert cc codex --dry-run
+npx @seungchan.m/swik status
+npx @seungchan.m/swik convert cc codex --dry-run
 ```
 
 グローバルにインストール:
 
 ```sh
-npm install -g swik
+npm install -g @seungchan.m/swik
 ```
 
 インストール後は `swik` を使います:
