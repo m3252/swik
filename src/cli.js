@@ -46,6 +46,7 @@ const { version: VERSION } = require("../package.json");
 const ROOT = process.cwd();
 const SUPPORTED = new Set(["cc", "claude", "claude-code", "codex"]);
 const MIGRATION_HEADER = /^# Project Instructions\n\nMigrated from (CLAUDE\.md|AGENTS\.md) by ai-switch\.\n\n/;
+const COMPILED_HEADER = /^# Project Instructions\n\nCompiled from Claude Code by ai-switch \(-{2}compile\)\.\n\n/;
 
 function skillCopyChanges(sources, target) {
   return sources.filter((source) => existsSync(source)).map((source) => ({ kind: "copy-dir", from: source, path: target }));
@@ -502,7 +503,7 @@ function planSync(cwd, options = {}) {
     }
   } else if (agentsMd && !claudeMd) {
     changes.push({ kind: "write", path: files.claudeMd, content: migrateInstruction(agentsMd, "AGENTS.md") });
-  } else if (claudeMd && agentsMd && claudeMd.trim() !== agentsMd.trim()) {
+  } else if (claudeMd && agentsMd && !sameInstructionContent(claudeMd, agentsMd)) {
     manualReviews.push("CLAUDE.md and AGENTS.md both exist and differ; sync will not overwrite either instruction file.");
     changes.push({ kind: "manual-review", label: "instructions", reason: "CLAUDE.md and AGENTS.md differ." });
   }
@@ -604,6 +605,23 @@ function migrateInstruction(content, sourceName) {
     body = body.replace(MIGRATION_HEADER, "").trim();
   }
   return `# Project Instructions\n\nMigrated from ${sourceName} by ai-switch.\n\n${body}\n`;
+}
+
+function sameInstructionContent(left, right) {
+  return normalizeInstructionForSync(left) === normalizeInstructionForSync(right);
+}
+
+function normalizeInstructionForSync(content) {
+  let body = content.trim();
+  while (MIGRATION_HEADER.test(body)) {
+    body = body.replace(MIGRATION_HEADER, "").trim();
+  }
+  if (COMPILED_HEADER.test(body)) {
+    body = body.replace(COMPILED_HEADER, "").trim();
+    const singleSource = body.match(/^## From [^\n]+\n\n([\s\S]*)$/);
+    if (singleSource) body = singleSource[1].trim();
+  }
+  return body;
 }
 
 function mergeCodexConfig(current, migratedBlock) {

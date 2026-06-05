@@ -1,6 +1,6 @@
 {
   "name": "@seungchan.m/ai-switch",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Migrate agent setup between Claude Code and OpenAI Codex CLI — CLAUDE.md/AGENTS.md, MCP servers, and skills. Safe and reversible.",
   "type": "module",
   "repository": {

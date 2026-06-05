@@ -197,6 +197,17 @@ test("sync reports instruction conflicts without overwriting either side", () =>
   assert.equal(changes.some((change) => change.path === path.join(dir, "AGENTS.md")), false);
 });
 
+test("sync is idempotent for instructions it generated", async () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");
+
+  await sync(dir, { compile: true, yes: true });
+  const rerun = planSync(dir, { compile: true });
+
+  assert.equal(rerun.some((change) => change.kind === "manual-review" && change.label === "instructions"), false);
+  assert.equal(rerun.some((change) => change.path === path.join(dir, "AGENTS.md")), false);
+});
+
 test("parses multi-line Codex args and inline env with commas and equals", () => {
   const dir = fixture();
   mkdirSync(path.join(dir, ".codex"), { recursive: true });
