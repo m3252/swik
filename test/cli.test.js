@@ -33,7 +33,7 @@ import {
 } from "../src/cli.js";
 
 function fixture() {
-  return mkdtempSync(path.join(tmpdir(), "ai-switch-"));
+  return mkdtempSync(path.join(tmpdir(), "swik-"));
 }
 
 function hasGit() {
@@ -147,7 +147,7 @@ test("plans Claude to Codex instruction, MCP, skills, and report", () => {
     "AGENTS.md",
     ".codex/config.toml",
     ".agents/skills",
-    "ai-switch-report.md"
+    "swik-report.md"
   ]);
   assert.match(changes[1].content, /\[mcp_servers\."local"\]/);
 });
@@ -198,7 +198,7 @@ url = "https://example.com/sse"
   assert.ok(relatives.includes(".mcp.json"));
   assert.ok(relatives.includes(".agents/skills/review"));
   assert.ok(relatives.includes(".claude/skills/fmt"));
-  assert.ok(relatives.includes("ai-switch-report.md"));
+  assert.ok(relatives.includes("swik-report.md"));
 
   const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml")).content;
   assert.match(codexConfig, /\[mcp_servers\.remote\]/);
@@ -240,7 +240,7 @@ test("sync --compile is idempotent for multi-source compiled instructions", asyn
 
   await sync(dir, { compile: true, yes: true });
   const rerun = planSync(dir, { compile: true });
-  const report = rerun.find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+  const report = rerun.find((change) => change.path?.endsWith("swik-report.md")).content;
 
   assert.equal(rerun.some((change) => change.kind === "manual-review" && change.label === "instructions"), false);
   assert.equal(rerun.some((change) => change.path === path.join(dir, "AGENTS.md")), false);
@@ -280,7 +280,7 @@ test("inventories required credentials without leaking literal secret values", (
   }));
 
   const changes = planCcToCodex(dir);
-  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+  const report = changes.find((change) => change.path?.endsWith("swik-report.md")).content;
   assert.match(report, /## Environment variables needed/);
   assert.match(report, /LINEAR_API_KEY \(server: linear\) — referenced via env/);
   assert.match(report, /GITHUB_TOKEN \(server: github\) — source config had a literal value/);
@@ -350,11 +350,11 @@ test("confirmed project writes locally gitignore backups and reports", async () 
   await convert("cc", "codex", { cwd: dir, yes: true });
 
   const exclude = readFileSync(path.join(dir, ".git", "info", "exclude"), "utf8");
-  assert.match(exclude, /^# ai-switch local ignores$/m);
-  assert.match(exclude, /^\.ai-switch-backups\/$/m);
-  assert.match(exclude, /^ai-switch-report\.md$/m);
-  assert.doesNotThrow(() => git(dir, ["check-ignore", ".ai-switch-backups/example"]));
-  assert.doesNotThrow(() => git(dir, ["check-ignore", "ai-switch-report.md"]));
+  assert.match(exclude, /^# swik local ignores$/m);
+  assert.match(exclude, /^\.swik-backups\/$/m);
+  assert.match(exclude, /^swik-report\.md$/m);
+  assert.doesNotThrow(() => git(dir, ["check-ignore", ".swik-backups/example"]));
+  assert.doesNotThrow(() => git(dir, ["check-ignore", "swik-report.md"]));
 });
 
 test("local git ignores are scoped when writing from a repo subdirectory", async () => {
@@ -368,10 +368,10 @@ test("local git ignores are scoped when writing from a repo subdirectory", async
   await convert("cc", "codex", { cwd: app, yes: true });
 
   const exclude = readFileSync(path.join(dir, ".git", "info", "exclude"), "utf8");
-  assert.match(exclude, /^packages\/app\/\.ai-switch-backups\/$/m);
-  assert.match(exclude, /^packages\/app\/ai-switch-report\.md$/m);
-  assert.doesNotThrow(() => git(dir, ["check-ignore", "packages/app/.ai-switch-backups/example"]));
-  assert.doesNotThrow(() => git(dir, ["check-ignore", "packages/app/ai-switch-report.md"]));
+  assert.match(exclude, /^packages\/app\/\.swik-backups\/$/m);
+  assert.match(exclude, /^packages\/app\/swik-report\.md$/m);
+  assert.doesNotThrow(() => git(dir, ["check-ignore", "packages/app/.swik-backups/example"]));
+  assert.doesNotThrow(() => git(dir, ["check-ignore", "packages/app/swik-report.md"]));
 });
 
 test("sync writes safe missing targets with backup only when confirmed", async () => {
@@ -609,13 +609,13 @@ test("parses handoff output options", () => {
   assert.equal(args.force, true);
 });
 
-test("package exposes ai-switch and swik binaries", () => {
+test("package exposes swik and swik binaries", () => {
   const pkg = JSON.parse(readFileSync(path.resolve("package.json"), "utf8"));
-  assert.equal(pkg.bin["ai-switch"], "src/cli.js");
+  assert.equal(pkg.bin["swik"], "src/cli.js");
   assert.equal(pkg.bin.swik, "src/cli.js");
 });
 
-test("swik alias prints swik-oriented help", { skip: process.platform === "win32" }, () => {
+test("swik binary prints swik-oriented help", { skip: process.platform === "win32" }, () => {
   const dir = fixture();
   const aliasPath = path.join(dir, "swik");
   symlinkSync(path.resolve("src/cli.js"), aliasPath);
@@ -626,7 +626,6 @@ test("swik alias prints swik-oriented help", { skip: process.platform === "win32
   });
 
   assert.match(output, /^swik\n/);
-  assert.match(output, /Alias: ai-switch/);
   assert.match(output, /swik convert cc codex --compile --dry-run/);
 });
 
@@ -694,7 +693,7 @@ test("converts Claude HTTP MCP servers to Codex url servers, flagging auth heade
 
   const changes = planCcToCodex(dir);
   const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml"));
-  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
+  const report = changes.find((change) => change.path?.endsWith("swik-report.md"));
 
   assert.match(codexConfig.content, /\[mcp_servers\."local"\]/);
   assert.match(codexConfig.content, /\[mcp_servers\."linear"\]/);
@@ -718,7 +717,7 @@ test("reports local absolute paths in Claude MCP settings", () => {
   }));
 
   const changes = planCcToCodex(dir);
-  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
+  const report = changes.find((change) => change.path?.endsWith("swik-report.md"));
   const notice = changes.find((change) => change.kind === "manual-review" && change.label === "mcp: localPath");
 
   assert.match(report.content, /contains local absolute path values/);
@@ -737,7 +736,7 @@ args = ["C:\\\\Users\\\\example\\\\server.js"]
 `);
 
   const changes = planCodexToCc(dir);
-  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
+  const report = changes.find((change) => change.path?.endsWith("swik-report.md"));
   const notice = changes.find((change) => change.kind === "manual-review" && change.label === "mcp: windowsPath");
 
   assert.match(report.content, /contains local absolute path values/);
@@ -762,7 +761,7 @@ args = ["existing.js"]
 
   const changes = planCcToCodex(dir);
   const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml"));
-  const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
+  const report = changes.find((change) => change.path?.endsWith("swik-report.md"));
 
   assert.equal([...codexConfig.content.matchAll(/\[mcp_servers\."docs"\]/g)].length, 1);
   assert.match(codexConfig.content, /\[mcp_servers\."notes"\]/);
@@ -802,7 +801,7 @@ test("reports Codex MCP sections with neither command nor url", () => {
 enabled = true
 `);
 
-  const report = planCodexToCc(dir).find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+  const report = planCodexToCc(dir).find((change) => change.path?.endsWith("swik-report.md")).content;
   assert.match(report, /Codex MCP server "broken" was not converted because it has no stdio command or url/);
 });
 
@@ -977,7 +976,7 @@ test("audit gaps appear in the migration report", () => {
   writeFileSync(path.join(dir, "CLAUDE.md"), "p\n");
   writeFileSync(path.join(dir, ".claude", "agents", "rev.md"), "a\n");
 
-  const report = planCcToCodex(dir).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  const report = planCcToCodex(dir).find((c) => c.path?.endsWith("swik-report.md")).content;
   assert.match(report, /## Other Claude surfaces detected/);
   assert.match(report, /\.claude\/agents \(manual\)/);
 });
@@ -992,7 +991,7 @@ test("compile report does not flag compiled instruction hierarchy as a gap", () 
   writeFileSync(path.join(dir, "CLAUDE.local.md"), "Local.\n");
   writeFileSync(path.join(dir, ".claude", "agents", "review.md"), "Agent.\n");
 
-  const report = planCcToCodex(dir, { compile: true }).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  const report = planCcToCodex(dir, { compile: true }).find((c) => c.path?.endsWith("swik-report.md")).content;
   assert.doesNotMatch(report, /\.claude\/CLAUDE.md \(manual\)/);
   assert.doesNotMatch(report, /\.claude\/rules \(manual\)/);
   assert.match(report, /CLAUDE.local.md \(manual\)/);
@@ -1004,7 +1003,7 @@ test("compile includeLocal report does not flag CLAUDE.local.md as a gap", () =>
   writeFileSync(path.join(dir, "CLAUDE.md"), "Root.\n");
   writeFileSync(path.join(dir, "CLAUDE.local.md"), "Local.\n");
 
-  const report = planCcToCodex(dir, { compile: true, includeLocal: true }).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  const report = planCcToCodex(dir, { compile: true, includeLocal: true }).find((c) => c.path?.endsWith("swik-report.md")).content;
   assert.doesNotMatch(report, /CLAUDE.local.md \(manual\)/);
   assert.doesNotMatch(report, /Other Claude surfaces detected/);
 });
@@ -1019,7 +1018,7 @@ test("Claude sse url servers are not auto-converted (only http)", () => {
   }));
   const changes = planCcToCodex(dir);
   const config = changes.find((c) => pathEndsWith(c.path, ".codex/config.toml")).content;
-  const report = changes.find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  const report = changes.find((c) => c.path?.endsWith("swik-report.md")).content;
   assert.doesNotMatch(config, /streamy/);
   assert.match(config, /\[mcp_servers\."webby"\]/);
   assert.match(report, /"streamy" uses the "sse" transport/);
@@ -1069,7 +1068,7 @@ test("codex->cc report has no Claude-surface gap section", () => {
   writeFileSync(path.join(dir, ".claude", "agents", "x.md"), "x\n");
   writeFileSync(path.join(dir, ".codex", "config.toml"), '[mcp_servers.x]\ncommand = "c"\n');
 
-  const report = planCodexToCc(dir).find((c) => c.path?.endsWith("ai-switch-report.md")).content;
+  const report = planCodexToCc(dir).find((c) => c.path?.endsWith("swik-report.md")).content;
   assert.doesNotMatch(report, /Other Claude surfaces detected/);
 });
 

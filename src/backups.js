@@ -29,7 +29,7 @@ async function makeBackup(cwd, changes = []) {
     const expectedHash = expectedHashForChange(change);
     if (expectedHash) created[path.relative(cwd, change.path)] = expectedHash;
   }
-  await writeFile(path.join(backupDir, ".ai-switch-manifest.json"), `${JSON.stringify({ createdAt: stamp, backedUp, planned, created }, null, 2)}\n`);
+  await writeFile(path.join(backupDir, ".swik-manifest.json"), `${JSON.stringify({ createdAt: stamp, backedUp, planned, created }, null, 2)}\n`);
   return backupDir;
 }
 
@@ -54,7 +54,7 @@ async function makeGlobalBackup(home, env, changes) {
     const hash = expectedHashForChange(change);
     if (hash) created[change.path] = hash;
   }
-  await writeFile(path.join(backupDir, ".ai-switch-manifest.json"),
+  await writeFile(path.join(backupDir, ".swik-manifest.json"),
     `${JSON.stringify({ scope: "global", createdAt: stamp, backedUp, planned, created }, null, 2)}\n`);
   return backupDir;
 }
@@ -70,7 +70,7 @@ function expectedHashForChange(change) {
 // merge into one target (e.g. .codex/skills + .agents/skills -> .claude/skills),
 // which would otherwise make `restore` think its own output was user-edited.
 async function refreshCreatedHashes(backupDir, resolve) {
-  const manifestPath = path.join(backupDir, ".ai-switch-manifest.json");
+  const manifestPath = path.join(backupDir, ".swik-manifest.json");
   const manifest = readJson(manifestPath);
   if (!manifest || manifest.__parseError || !manifest.created) return;
   for (const key of Object.keys(manifest.created)) {
@@ -131,18 +131,18 @@ function listGlobalBackups(home = homedir()) {
 function listBackupDirs(dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((name) => existsSync(path.join(dir, name, ".ai-switch-manifest.json")))
+    .filter((name) => existsSync(path.join(dir, name, ".swik-manifest.json")))
     .sort();
 }
 
 async function restoreBackup(cwd, selector, options = {}) {
   const backups = listBackups(cwd);
-  if (backups.length === 0) throw new Error("No ai-switch backups found.");
+  if (backups.length === 0) throw new Error("No swik backups found.");
   const stamp = selector === "latest" ? backups.at(-1) : selector;
   if (!backups.includes(stamp)) throw new Error(`Backup not found: ${selector}`);
 
   const backupDir = path.join(projectPaths(cwd).backupDir, stamp);
-  const manifest = readJson(path.join(backupDir, ".ai-switch-manifest.json"));
+  const manifest = readJson(path.join(backupDir, ".swik-manifest.json"));
   if (!manifest || manifest.__parseError) throw new Error(`Invalid backup manifest: ${stamp}`);
 
   const removals = (manifest.planned ?? []).filter((relative) => !(manifest.backedUp ?? []).includes(relative));
@@ -175,12 +175,12 @@ async function restoreBackup(cwd, selector, options = {}) {
 async function restoreGlobalBackup(home, selector, env = process.env, options = {}) {
   const files = globalPathsFor(home, env);
   const backups = listBackupDirs(files.backupDir);
-  if (backups.length === 0) throw new Error("No ai-switch global backups found.");
+  if (backups.length === 0) throw new Error("No swik global backups found.");
   const stamp = selector === "latest" ? backups.at(-1) : selector;
   if (!backups.includes(stamp)) throw new Error(`Global backup not found: ${selector}`);
 
   const backupDir = path.join(files.backupDir, stamp);
-  const manifest = readJson(path.join(backupDir, ".ai-switch-manifest.json"));
+  const manifest = readJson(path.join(backupDir, ".swik-manifest.json"));
   if (!manifest || manifest.__parseError) throw new Error(`Invalid backup manifest: ${stamp}`);
 
   const backedUpTargets = new Set((manifest.backedUp ?? []).map((entry) => entry.target));

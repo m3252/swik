@@ -1,28 +1,28 @@
-# ai-switch
+# swik
 
 > **Claude Code** と **Codex** の間でプロジェクト設定を移動します: 指示、MCP サーバー、スキル。まずプレビューし、書き込みは毎回バックアップし、必要なら復元できます。
 
-[![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
+[![CI](https://github.com/m3252/swik/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/swik/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/swik)](https://www.npmjs.com/package/swik)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 [English](../README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
 
-`ai-switch` は、Claude Code と Codex の間でプロジェクトを切り替えるときに、同じ設定を手で作り直さなくて済むようにするゼロ依存 CLI です。日常的に使うコマンドは **`swik`** で、npm package は名前衝突を避けるため `@seungchan.m/ai-switch` として公開されています。移植可能なプロジェクト設定だけを移行し、手作業が必要なものはレポートします。アカウント、セッション、チャット履歴、シークレット値には触れません。
+`swik` は、Claude Code と Codex の間でプロジェクトを切り替えるときに、同じ設定を手で作り直さなくて済むようにするゼロ依存 CLI です。移植可能なプロジェクト設定だけを移行し、手作業が必要なものはレポートします。アカウント、セッション、チャット履歴、シークレット値には触れません。
 
 ## すぐ試す
 
 インストールせずに一度だけ実行:
 
 ```sh
-npx @seungchan.m/ai-switch status
-npx @seungchan.m/ai-switch convert cc codex --dry-run
+npx swik status
+npx swik convert cc codex --dry-run
 ```
 
 グローバルにインストール:
 
 ```sh
-npm install -g @seungchan.m/ai-switch
+npm install -g swik
 ```
 
 インストール後は `swik` を使います:
@@ -32,7 +32,7 @@ swik status
 swik sync --compile --dry-run
 ```
 
-完全なコマンド名 `ai-switch` も引き続き使えますが、文書の例では非 scoped npm package との混同を避けるため `swik` を優先します。
+完全なコマンド名 `swik` も引き続き使えますが、文書の例では非 scoped npm package との混同を避けるため `swik` を優先します。
 
 ## よく使う流れ
 
@@ -112,7 +112,7 @@ swik restore latest --global
 
 ## 互換性ベースライン
 
-ai-switch 0.8.x の test fixture は、2026-06 時点の Claude Code 2.1.162 と Codex CLI 0.136.0 の project config shape を基準にしています。自動変換するのは上表の portable subset だけで、それ以外のフィールドはレポートまたは手作業扱いです。
+swik 0.8.x の test fixture は、2026-06 時点の Claude Code 2.1.162 と Codex CLI 0.136.0 の project config shape を基準にしています。自動変換するのは上表の portable subset だけで、それ以外のフィールドはレポートまたは手作業扱いです。
 
 設計上、対象外のもの:
 
@@ -128,7 +128,7 @@ $ swik convert cc codex --compile --dry-run
 create   AGENTS.md
 create   .codex/config.toml
 copy     .claude/skills -> .agents/skills
-report   ai-switch-report.md
+report   swik-report.md
 ```
 
 ```text
@@ -191,8 +191,8 @@ codex = codex
 - `--dry-run` は計画だけを表示し、書き込みません。
 - 移行の書き込みには `--yes` が必要です。
 - 既存ファイルは `--force` なしでは上書きしません。
-- すべての移行で元ファイルを `.ai-switch-backups/<timestamp>/` にスナップショットします。
-- Git worktree 内でプロジェクトに書き込む前に、`.ai-switch-backups/` と `ai-switch-report.md` を `.git/info/exclude` に追加します。
+- すべての移行で元ファイルを `.swik-backups/<timestamp>/` にスナップショットします。
+- Git worktree 内でプロジェクトに書き込む前に、`.swik-backups/` と `swik-report.md` を `.git/info/exclude` に追加します。
 - `restore latest` は元ファイルを復元し、移行で作られたファイルを削除します。
 - 移行後にあなたが編集した生成ファイルは、`--force` なしでは削除を拒否します。
 
@@ -200,17 +200,17 @@ codex = codex
 
 ## 認証情報とシークレット
 
-MCP サーバーには API key や token が必要なことがあります。ai-switch は配線だけを移行します。つまりサーバー名、コマンド、引数、環境変数名です。シークレット値を別ツールの設定やレポートへコピーすることはありません。
+MCP サーバーには API key や token が必要なことがあります。swik は配線だけを移行します。つまりサーバー名、コマンド、引数、環境変数名です。シークレット値を別ツールの設定やレポートへコピーすることはありません。
 
-ソース設定に env の生値がある場合、ai-switch はターゲット設定では `$NAME` 参照に書き換え、その変数を `ai-switch-report.md` に列挙します。
+ソース設定に env の生値がある場合、swik はターゲット設定では `$NAME` 参照に書き換え、その変数を `swik-report.md` に列挙します。
 
-バックアップは正確なロールバックのために元ファイルを保持します。ソース設定がすでにシークレットの生値を含む場合、ローカルバックアップにも含まれる可能性があります。プロジェクトバックアップは `.ai-switch-backups/` に置かれ、Git repository では書き込み前にこのディレクトリと `ai-switch-report.md` を `.git/info/exclude` に追加します。グローバルバックアップはプロジェクト外の `~/.ai-switch/backups/global/` にあります。
+バックアップは正確なロールバックのために元ファイルを保持します。ソース設定がすでにシークレットの生値を含む場合、ローカルバックアップにも含まれる可能性があります。プロジェクトバックアップは `.swik-backups/` に置かれ、Git repository では書き込み前にこのディレクトリと `swik-report.md` を `.git/info/exclude` に追加します。グローバルバックアップはプロジェクト外の `~/.swik/backups/global/` にあります。
 
 ## Compile Instructions
 
 デフォルトでは、`cc -> codex` はルートの `CLAUDE.md` だけをコピーします。
 
-`--compile` を使うと、ai-switch はソースラベル付きの `AGENTS.md` を書きます:
+`--compile` を使うと、swik はソースラベル付きの `AGENTS.md` を書きます:
 
 ```sh
 swik convert cc codex --compile --dry-run
@@ -223,7 +223,7 @@ swik convert cc codex --compile --include-local --yes
 ```md
 # Project Instructions
 
-Compiled from Claude Code by ai-switch (--compile).
+Compiled from Claude Code by swik (--compile).
 
 ## From CLAUDE.md
 ...

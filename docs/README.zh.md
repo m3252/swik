@@ -1,28 +1,28 @@
-# ai-switch
+# swik
 
 > 在 **Claude Code** 与 **Codex** 之间移动项目配置：指令、MCP 服务器和技能。先预览，每次写入都备份，需要时可恢复。
 
-[![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
+[![CI](https://github.com/m3252/swik/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/swik/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/swik)](https://www.npmjs.com/package/swik)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 [English](../README.md) · [한국어](README.ko.md) · **中文** · [日本語](README.ja.md)
 
-`ai-switch` 是一个零依赖 CLI，用来在 Claude Code 与 Codex 之间切换项目，而不用每次手动重建同一套配置。日常使用的命令是 **`swik`**；npm 包使用作用域名 `@seungchan.m/ai-switch` 以避免名称冲突。它只迁移可移植的项目配置，并报告需要人工处理的内容。它绝不触碰账号、会话、聊天记录或密钥值。
+`swik` 是一个零依赖 CLI，用来在 Claude Code 与 Codex 之间切换项目，而不用每次手动重建同一套配置。它只迁移可移植的项目配置，并报告需要人工处理的内容。它绝不触碰账号、会话、聊天记录或密钥值。
 
 ## 立即试用
 
 无需安装，直接运行一次：
 
 ```sh
-npx @seungchan.m/ai-switch status
-npx @seungchan.m/ai-switch convert cc codex --dry-run
+npx swik status
+npx swik convert cc codex --dry-run
 ```
 
 全局安装：
 
 ```sh
-npm install -g @seungchan.m/ai-switch
+npm install -g swik
 ```
 
 安装后使用 `swik`：
@@ -32,7 +32,7 @@ swik status
 swik sync --compile --dry-run
 ```
 
-完整命令 `ai-switch` 仍然可用，但文档示例优先使用 `swik`，以减少与非作用域 npm 包的混淆。
+完整命令 `swik` 仍然可用，但文档示例优先使用 `swik`，以减少与非作用域 npm 包的混淆。
 
 ## 常用流程
 
@@ -112,7 +112,7 @@ swik restore latest --global
 
 ## 兼容性基线
 
-ai-switch 0.8.x 的测试 fixture 以 2026-06 的 Claude Code 2.1.162 与 Codex CLI 0.136.0 项目配置形状为基准。自动转换只覆盖上表中的可移植子集；其他字段会进入报告或保留为手动处理。
+swik 0.8.x 的测试 fixture 以 2026-06 的 Claude Code 2.1.162 与 Codex CLI 0.136.0 项目配置形状为基准。自动转换只覆盖上表中的可移植子集；其他字段会进入报告或保留为手动处理。
 
 设计上不迁移：
 
@@ -128,7 +128,7 @@ $ swik convert cc codex --compile --dry-run
 create   AGENTS.md
 create   .codex/config.toml
 copy     .claude/skills -> .agents/skills
-report   ai-switch-report.md
+report   swik-report.md
 ```
 
 ```text
@@ -191,8 +191,8 @@ codex = codex
 - `--dry-run` 只打印计划，不写入。
 - 迁移写入需要 `--yes`。
 - 不加 `--force` 不覆盖已有文件。
-- 每次迁移都会把原文件快照到 `.ai-switch-backups/<timestamp>/`。
-- 在 Git worktree 内写入项目文件前，会把 `.ai-switch-backups/` 和 `ai-switch-report.md` 加到 `.git/info/exclude`。
+- 每次迁移都会把原文件快照到 `.swik-backups/<timestamp>/`。
+- 在 Git worktree 内写入项目文件前，会把 `.swik-backups/` 和 `swik-report.md` 加到 `.git/info/exclude`。
 - `restore latest` 会恢复原文件并删除迁移创建的文件。
 - 如果迁移创建的文件之后被你修改过，restore 会拒绝删除，除非传入 `--force`。
 
@@ -200,17 +200,17 @@ codex = codex
 
 ## 凭证与密钥
 
-MCP 服务器常需要 API key 或 token。ai-switch 只迁移接线：服务器名、命令、参数和环境变量名；绝不把密钥值复制到另一个工具的配置或报告中。
+MCP 服务器常需要 API key 或 token。swik 只迁移接线：服务器名、命令、参数和环境变量名；绝不把密钥值复制到另一个工具的配置或报告中。
 
-如果源配置里有字面量 env 值，ai-switch 会在目标配置中把它改写为 `$NAME` 引用，并在 `ai-switch-report.md` 中列出变量名。
+如果源配置里有字面量 env 值，swik 会在目标配置中把它改写为 `$NAME` 引用，并在 `swik-report.md` 中列出变量名。
 
-备份会保留原始文件以便精确回滚。如果源配置本身已经包含字面量密钥，本地备份也可能包含它们。项目备份位于 `.ai-switch-backups/`；在 Git 仓库中写入前会把该目录和 `ai-switch-report.md` 加到 `.git/info/exclude`。全局备份位于项目外的 `~/.ai-switch/backups/global/`。
+备份会保留原始文件以便精确回滚。如果源配置本身已经包含字面量密钥，本地备份也可能包含它们。项目备份位于 `.swik-backups/`；在 Git 仓库中写入前会把该目录和 `swik-report.md` 加到 `.git/info/exclude`。全局备份位于项目外的 `~/.swik/backups/global/`。
 
 ## Compile Instructions
 
 默认情况下，`cc -> codex` 只复制根 `CLAUDE.md`。
 
-使用 `--compile` 时，ai-switch 会写出带来源标签的 `AGENTS.md`：
+使用 `--compile` 时，swik 会写出带来源标签的 `AGENTS.md`：
 
 ```sh
 swik convert cc codex --compile --dry-run
@@ -223,7 +223,7 @@ swik convert cc codex --compile --include-local --yes
 ```md
 # Project Instructions
 
-Compiled from Claude Code by ai-switch (--compile).
+Compiled from Claude Code by swik (--compile).
 
 ## From CLAUDE.md
 ...

@@ -1,18 +1,17 @@
 {
-  "name": "@seungchan.m/ai-switch",
-  "version": "0.8.2",
+  "name": "swik",
+  "version": "0.8.3",
   "description": "Migrate agent setup between Claude Code and OpenAI Codex CLI — CLAUDE.md/AGENTS.md, MCP servers, and skills. Safe and reversible.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/m3252/ai-switch.git"
+    "url": "git+https://github.com/m3252/swik.git"
   },
-  "homepage": "https://github.com/m3252/ai-switch#readme",
+  "homepage": "https://github.com/m3252/swik#readme",
   "bugs": {
-    "url": "https://github.com/m3252/ai-switch/issues"
+    "url": "https://github.com/m3252/swik/issues"
   },
   "bin": {
-    "ai-switch": "src/cli.js",
     "swik": "src/cli.js"
   },
   "files": [

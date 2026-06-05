@@ -1,6 +1,6 @@
 # Security Policy
 
-`ai-switch` moves agent configuration between Claude Code and Codex, at the project level or — with explicit `--global` — at the home level (allowlisted files only). Treat migration output as sensitive until you review it.
+`swik` moves agent configuration between Claude Code and Codex, at the project level or — with explicit `--global` — at the home level (allowlisted files only). Treat migration output as sensitive until you review it.
 
 ## Supported Data
 
@@ -24,9 +24,9 @@ Please open a private security advisory or contact the maintainers before publis
 
 ## Handling Secrets
 
-`ai-switch` never copies literal environment values into target configs or reports. A literal `env` value is written as a `$NAME` reference and listed in the report; you set the actual variable in the target tool's environment.
+`swik` never copies literal environment values into target configs or reports. A literal `env` value is written as a `$NAME` reference and listed in the report; you set the actual variable in the target tool's environment.
 
-Backups preserve the original allowlisted source files for rollback, so if your source config already contains literal secrets, the local backup may contain them too. Backups are local only, live under `~/.ai-switch/` (global) or `.ai-switch-backups/` (project), and are `.gitignore`d. When a migration sees literal env values, the report and the CLI print a warning that the backup may preserve them.
+Backups preserve the original allowlisted source files for rollback, so if your source config already contains literal secrets, the local backup may contain them too. Backups are local only, live under `~/.swik/` (global) or `.swik-backups/` (project), and are `.gitignore`d. When a migration sees literal env values, the report and the CLI print a warning that the backup may preserve them.
 
 The CLI does not verify whether a value is actually a secret. Always review generated config before running migrated agents.
 

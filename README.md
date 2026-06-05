@@ -1,28 +1,28 @@
-# ai-switch
+# swik
 
 > Move agent setup between **Claude Code** and **OpenAI Codex CLI**: instructions, MCP servers, and skills. Preview first, back up every write, restore when needed.
 
-[![CI](https://github.com/m3252/ai-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/ai-switch/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@seungchan.m/ai-switch)](https://www.npmjs.com/package/@seungchan.m/ai-switch)
+[![CI](https://github.com/m3252/swik/actions/workflows/ci.yml/badge.svg)](https://github.com/m3252/swik/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/swik)](https://www.npmjs.com/package/swik)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **English** · [한국어](docs/README.ko.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md)
 
-`ai-switch` is a zero-dependency CLI for switching projects between Claude Code and OpenAI Codex CLI without rebuilding the same setup by hand. The command you run day to day is **`swik`**; the npm package is scoped as `@seungchan.m/ai-switch` to avoid name collisions. It migrates only portable agent config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
+`swik` is a zero-dependency CLI for switching projects between Claude Code and OpenAI Codex CLI without rebuilding the same setup by hand. It migrates only portable agent config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
 
 ## Try It
 
 Run once without installing:
 
 ```sh
-npx @seungchan.m/ai-switch status
-npx @seungchan.m/ai-switch convert cc codex --dry-run
+npx swik status
+npx swik convert cc codex --dry-run
 ```
 
 Install globally:
 
 ```sh
-npm install -g @seungchan.m/ai-switch
+npm install -g swik
 ```
 
 Then use `swik`:
@@ -32,7 +32,7 @@ swik status
 swik sync --compile --dry-run
 ```
 
-`ai-switch` remains available as the full command, but examples use `swik` to avoid confusion with the unrelated unscoped npm package.
+`swik` remains available as the full command, but examples use `swik` to avoid confusion with the unrelated unscoped npm package.
 
 ## Common Workflows
 
@@ -114,7 +114,7 @@ swik restore latest --global
 
 ## Compatibility
 
-ai-switch is intentionally fixture-pinned instead of claiming full Claude/Codex compatibility. The 0.8.x contract is tested in this repo against Claude Code 2.1.162 and Codex CLI 0.136.0 project config shapes as of 2026-06.
+swik is intentionally fixture-pinned instead of claiming full Claude/Codex compatibility. The 0.8.x contract is tested in this repo against Claude Code 2.1.162 and Codex CLI 0.136.0 project config shapes as of 2026-06.
 
 | Config surface | Auto-converted | Manual/report only |
 | --- | --- | --- |
@@ -123,7 +123,7 @@ ai-switch is intentionally fixture-pinned instead of claiming full Claude/Codex 
 | Instructions | `CLAUDE.md`; Claude hierarchy with `--compile` | local/private files unless `--include-local`, unsafe `@include` targets |
 | Skills | local skill folders copied as files | runtime behavior, tool permissions, hooks, model choices |
 
-Unknown fields are preserved only when ai-switch appends to an existing config. They are not semantically translated unless listed above.
+Unknown fields are preserved only when swik appends to an existing config. They are not semantically translated unless listed above.
 
 Out of scope by design:
 
@@ -139,7 +139,7 @@ $ swik convert cc codex --compile --dry-run
 create   AGENTS.md
 create   .codex/config.toml
 copy     .claude/skills -> .agents/skills
-report   ai-switch-report.md
+report   swik-report.md
 ```
 
 ```text
@@ -202,8 +202,8 @@ Conservative by default:
 - `--dry-run` prints the plan and writes nothing.
 - Migration writes require `--yes`.
 - Existing files are not overwritten without `--force`.
-- Every migration snapshots originals to `.ai-switch-backups/<timestamp>/`.
-- In Git worktrees, project writes add `.ai-switch-backups/` and `ai-switch-report.md` to `.git/info/exclude` before writing.
+- Every migration snapshots originals to `.swik-backups/<timestamp>/`.
+- In Git worktrees, project writes add `.swik-backups/` and `swik-report.md` to `.git/info/exclude` before writing.
 - `restore latest` restores originals and removes files created by the migration.
 - Restore refuses to delete migration-created files you edited after migration unless you pass `--force`.
 
@@ -211,17 +211,17 @@ Conservative by default:
 
 ## Credentials and Secrets
 
-MCP servers often need API keys or tokens. ai-switch migrates the wiring — server names, commands, args, and env-var names — but never copies secret values into the other tool's config or the report.
+MCP servers often need API keys or tokens. swik migrates the wiring — server names, commands, args, and env-var names — but never copies secret values into the other tool's config or the report.
 
-If the source config has a literal env value, ai-switch rewrites it as a `$NAME` reference in the target config and lists that variable in `ai-switch-report.md`.
+If the source config has a literal env value, swik rewrites it as a `$NAME` reference in the target config and lists that variable in `swik-report.md`.
 
-Backups preserve original files for exact rollback. If your source config already contains literal secrets, the local backup may contain them too. Project backups live in `.ai-switch-backups/`; project writes inside Git add `.ai-switch-backups/` and `ai-switch-report.md` to `.git/info/exclude` before writing. Global backups live outside the project at `~/.ai-switch/backups/global/`.
+Backups preserve original files for exact rollback. If your source config already contains literal secrets, the local backup may contain them too. Project backups live in `.swik-backups/`; project writes inside Git add `.swik-backups/` and `swik-report.md` to `.git/info/exclude` before writing. Global backups live outside the project at `~/.swik/backups/global/`.
 
 ## Compile Instructions
 
 By default, `cc -> codex` copies only the root `CLAUDE.md`.
 
-With `--compile`, ai-switch writes a traceable `AGENTS.md` with source labels:
+With `--compile`, swik writes a traceable `AGENTS.md` with source labels:
 
 ```sh
 swik convert cc codex --compile --dry-run
@@ -234,7 +234,7 @@ The compiled output includes sections like:
 ```md
 # Project Instructions
 
-Compiled from Claude Code by ai-switch (--compile).
+Compiled from Claude Code by swik (--compile).
 
 ## From CLAUDE.md
 ...

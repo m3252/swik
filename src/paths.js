@@ -12,12 +12,12 @@ const RELATIVE_PATHS = {
   codexSkills: ".codex/skills",
   agentsDir: ".agents",
   agentsSkills: ".agents/skills",
-  report: "ai-switch-report.md",
-  backupDir: ".ai-switch-backups"
+  report: "swik-report.md",
+  backupDir: ".swik-backups"
 };
 
 const GLOBAL_RELATIVE_PATHS = {
-  backupDir: ".ai-switch/backups/global"
+  backupDir: ".swik/backups/global"
 };
 
 function projectPaths(cwd) {
@@ -40,11 +40,11 @@ function globalPathsFor(home, env = process.env) {
     // of CODEX_HOME; ~/.codex/skills is the deprecated-but-still-read fallback.
     agentsSkills: path.join(home, ".agents", "skills"),
     backupDir: path.join(home, GLOBAL_RELATIVE_PATHS.backupDir),
-    report: path.join(home, ".ai-switch", RELATIVE_PATHS.report)
+    report: path.join(home, ".swik", RELATIVE_PATHS.report)
   };
 }
 
-// The ONLY global files ai-switch reads or writes. Everything else under
+// The ONLY global files swik reads or writes. Everything else under
 // ~/.claude and ~/.codex (auth.json, sessions/, state_*.sqlite, logs, caches,
 // rollouts, vendor_imports, ...) is deliberately untouched. Each entry has a
 // stable backup key so backup/restore works regardless of CLAUDE_CONFIG_DIR /

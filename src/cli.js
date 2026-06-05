@@ -46,8 +46,8 @@ const { version: VERSION } = require("../package.json");
 
 const ROOT = process.cwd();
 const SUPPORTED = new Set(["cc", "claude", "claude-code", "codex"]);
-const MIGRATION_HEADER = /^# Project Instructions\n\nMigrated from (CLAUDE\.md|AGENTS\.md) by ai-switch\.\n\n/;
-const COMPILED_HEADER = /^# Project Instructions\n\nCompiled from Claude Code by ai-switch \(-{2}compile\)\.\n\n/;
+const MIGRATION_HEADER = /^# Project Instructions\n\nMigrated from (CLAUDE\.md|AGENTS\.md) by (?:swik|ai-switch)\.\n\n/;
+const COMPILED_HEADER = /^# Project Instructions\n\nCompiled from Claude Code by (?:swik|ai-switch) \(-{2}compile\)\.\n\n/;
 
 function skillCopyChanges(sources, target) {
   return sources.filter((source) => existsSync(source)).map((source) => ({ kind: "copy-dir", from: source, path: target }));
@@ -57,12 +57,9 @@ function countSkillDirs(dirs) {
   return dirs.reduce((total, dir) => total + listDir(dir).length, 0);
 }
 
-function usage(commandName = "ai-switch") {
-  const bin = commandName === "swik" ? "swik" : "ai-switch";
-  const alias = bin === "swik" ? "ai-switch" : "swik";
+function usage() {
+  const bin = "swik";
   return `${bin}
-
-Alias: ${alias}
 
 Usage:
   ${bin} detect [--cwd <path>]
@@ -275,7 +272,7 @@ async function handoff(cwd, options = {}) {
 // Global (home-level) convert. Operates ONLY on the allowlisted files in
 // ~/.claude and ~/.codex (never whole directories). Same secret policy as
 // project convert: literal env values become $NAME references. Backups live in
-// ~/.ai-switch/backups/global with a "global" manifest scope.
+// ~/.swik/backups/global with a "global" manifest scope.
 // ---------------------------------------------------------------------------
 
 function globalClaudeMcp(files) {
@@ -301,7 +298,7 @@ function planCcToCodexGlobal(home, env = process.env) {
     changes.push(...analysis.planItems);
     if (Object.keys(analysis.supported).length > 0) {
       credentials = collectCredentials(analysis.supported);
-      const migratedBlock = `\n# Migrated from Claude MCP settings by ai-switch.\n${toCodexToml(withReferencedEnv(analysis.supported))}`;
+      const migratedBlock = `\n# Migrated from Claude MCP settings by swik.\n${toCodexToml(withReferencedEnv(analysis.supported))}`;
       changes.push({ kind: "write", path: files.codexConfig, content: mergeCodexConfig(current, migratedBlock) });
     }
   }
@@ -396,7 +393,7 @@ function assertNoUnsafeOverwritesGlobal(changes, files, force = false) {
 
 function assertProjectWriteScope(cwd) {
   if (!isHomeDirectory(cwd)) return;
-  throw new Error("Refusing project migration in your home directory. Run convert/backup/restore inside a project directory, or use `--global` for home-level config (e.g. `ai-switch convert cc codex --global`).");
+  throw new Error("Refusing project migration in your home directory. Run convert/backup/restore inside a project directory, or use `--global` for home-level config (e.g. `swik convert cc codex --global`).");
 }
 
 function isHomeDirectory(cwd, home = homedir()) {
@@ -437,7 +434,7 @@ async function ensureProjectLocalIgnores(cwd) {
 
   let next = current;
   if (next && !next.endsWith("\n")) next += "\n";
-  if (!existing.has("# ai-switch local ignores")) next += "# ai-switch local ignores\n";
+  if (!existing.has("# swik local ignores")) next += "# swik local ignores\n";
   for (const entry of missing) next += `${entry.pattern}\n`;
 
   await mkdir(path.dirname(excludePath), { recursive: true });
@@ -506,7 +503,7 @@ function planCcToCodex(cwd, options = {}) {
     changes.push(...analysis.planItems);
     if (Object.keys(analysis.supported).length > 0) {
       credentials = collectCredentials(analysis.supported);
-      const migratedBlock = `\n# Migrated from Claude MCP settings by ai-switch.\n${toCodexToml(withReferencedEnv(analysis.supported))}`;
+      const migratedBlock = `\n# Migrated from Claude MCP settings by swik.\n${toCodexToml(withReferencedEnv(analysis.supported))}`;
       changes.push({
         kind: "write",
         path: files.codexConfig,
@@ -598,7 +595,7 @@ function planSync(cwd, options = {}) {
   changes.push(...claudeToCodex.planItems);
   if (Object.keys(claudeToCodex.supported).length > 0) {
     credentials.push(...collectCredentials(claudeToCodex.supported));
-    const migratedBlock = `\n# Synced from Claude MCP settings by ai-switch.\n${toCodexToml(withReferencedEnv(claudeToCodex.supported))}`;
+    const migratedBlock = `\n# Synced from Claude MCP settings by swik.\n${toCodexToml(withReferencedEnv(claudeToCodex.supported))}`;
     changes.push({ kind: "write", path: files.codexConfig, content: mergeCodexConfig(currentCodex, migratedBlock) });
   }
 
@@ -683,7 +680,7 @@ function migrateInstruction(content, sourceName) {
   while (MIGRATION_HEADER.test(body)) {
     body = body.replace(MIGRATION_HEADER, "").trim();
   }
-  return `# Project Instructions\n\nMigrated from ${sourceName} by ai-switch.\n\n${body}\n`;
+  return `# Project Instructions\n\nMigrated from ${sourceName} by swik.\n\n${body}\n`;
 }
 
 function sameInstructionContent(left, right) {
@@ -713,7 +710,7 @@ function mergeCodexConfig(current, migratedBlock) {
 function reportChange(baseDir, reportPath, from, to, changes, manualReviews = [], credentials = [], audit = []) {
   const auditGaps = auditGapLines(audit);
   const lines = [
-    `# ai-switch migration report`,
+    `# swik migration report`,
     "",
     `- from: ${from}`,
     `- to: ${to}`,
@@ -730,14 +727,14 @@ function reportChange(baseDir, reportPath, from, to, changes, manualReviews = []
     ...(auditGaps.length > 0 ? [
       "## Other Claude surfaces detected (not auto-migrated)",
       "",
-      "ai-switch migrates instructions, MCP, and skills. These additional surfaces were found and need manual attention — run `ai-switch audit` for the full list:",
+      "swik migrates instructions, MCP, and skills. These additional surfaces were found and need manual attention — run `swik audit` for the full list:",
       "",
       ...auditGaps,
       ""
     ] : []),
     "## Environment variables needed",
     "",
-    "ai-switch never copies literal env values into target configs or reports. Set these variables in the target tool's environment before the migrated MCP servers will run:",
+    "swik never copies literal env values into target configs or reports. Set these variables in the target tool's environment before the migrated MCP servers will run:",
     "",
     ...credentialLines(credentials),
     "",
@@ -745,7 +742,7 @@ function reportChange(baseDir, reportPath, from, to, changes, manualReviews = []
     "",
     "- Secrets and account sessions are intentionally not migrated.",
     "- Literal env values are replaced with `$NAME` in the migrated config and this report; they are never written into the target tool. Verify paths before use.",
-    "- Backups preserve your original allowlisted files. Project writes add `.ai-switch-backups/` and `ai-switch-report.md` to `.git/info/exclude` when run inside a Git worktree; global backups live outside the project at `~/.ai-switch/backups/global/`. If backed-up files contain literal secrets, the backup will too.",
+    "- Backups preserve your original allowlisted files. Project writes add `.swik-backups/` and `swik-report.md` to `.git/info/exclude` when run inside a Git worktree; global backups live outside the project at `~/.swik/backups/global/`. If backed-up files contain literal secrets, the backup will too.",
     "- Skills are copied as files, but runtime compatibility depends on each agent."
   ];
   return {
@@ -836,7 +833,7 @@ function projectStatus(cwd) {
   const result = detect(cwd);
   const backups = listBackups(cwd).length;
   const notes = isHomeDirectory(cwd)
-    ? ["Note: this is your home directory. For home-level config use `--global` (e.g. `ai-switch convert cc codex --global`); run project conversions inside a project directory."]
+    ? ["Note: this is your home directory. For home-level config use `--global` (e.g. `swik convert cc codex --global`); run project conversions inside a project directory."]
     : [];
   return [
     `Project: ${result.cwd}`,
@@ -899,7 +896,7 @@ function doctorReport(cwd) {
   }
   const auditGaps = auditSurfaces(cwd).filter((surface) => surface.status !== "migrated");
   if (auditGaps.length > 0) {
-    warnings.push(`${auditGaps.length} Claude surface(s) won't auto-migrate (run \`ai-switch audit\` for the full list).`);
+    warnings.push(`${auditGaps.length} Claude surface(s) won't auto-migrate (run \`swik audit\` for the full list).`);
   }
   return { result, problems, warnings, suggestions: doctorSuggestions(result, problems, warnings, auditGaps) };
 }
@@ -940,7 +937,7 @@ function doctor(cwd) {
   }
 }
 
-// Detect Claude Code surfaces beyond the three ai-switch migrates (instructions,
+// Detect Claude Code surfaces beyond the three swik migrates (instructions,
 // MCP, skills) and classify each: migrated (auto), manual (detected, needs hand
 // work in Codex), or unsupported (no Codex equivalent). This is what makes the
 // tool honest about its scope instead of implying a full one-to-one port.
@@ -1023,7 +1020,7 @@ function formatAudit(cwd) {
   return lines.join("\n");
 }
 
-// Report lines for surfaces that ai-switch did NOT auto-migrate (the gaps).
+// Report lines for surfaces that swik did NOT auto-migrate (the gaps).
 function auditGapLines(surfaces) {
   const gaps = surfaces.filter((surface) => surface.status !== "migrated");
   if (gaps.length === 0) return [];
@@ -1037,7 +1034,7 @@ async function main() {
     return;
   }
   if (args.help || args._.length === 0) {
-    console.log(usage(path.basename(process.argv[1] ?? "ai-switch")));
+    console.log(usage());
     return;
   }
 
@@ -1063,7 +1060,7 @@ async function main() {
   }
   else if (command === "backups") {
     const backups = args.global ? listGlobalBackups(args.home ?? homedir()) : listBackups(args.cwd);
-    console.log(backups.length > 0 ? backups.join("\n") : "No ai-switch backups found.");
+    console.log(backups.length > 0 ? backups.join("\n") : "No swik backups found.");
   }
   else if (command === "restore") {
     const selector = from ?? "latest";

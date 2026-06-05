@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve `ai-switch`.
+Thanks for helping improve `swik`.
 
 ## Project Boundaries
 

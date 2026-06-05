@@ -27,7 +27,7 @@ function compileInstructions(cwd, options = {}) {
   }
 
   if (blocks.length === 0) return { content: undefined, manualReviews: ctx.manualReviews, sources: [] };
-  const content = `# Project Instructions\n\nCompiled from Claude Code by ai-switch (--compile).\n\n${blocks.join("\n\n")}\n`;
+  const content = `# Project Instructions\n\nCompiled from Claude Code by swik (--compile).\n\n${blocks.join("\n\n")}\n`;
   return { content, manualReviews: ctx.manualReviews, sources: compiledSources };
 }
 
