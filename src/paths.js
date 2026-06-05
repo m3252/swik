@@ -5,19 +5,19 @@ const RELATIVE_PATHS = {
   agentsMd: "AGENTS.md",
   mcpJson: ".mcp.json",
   claudeDir: ".claude",
-  claudeSettings: path.join(".claude", "settings.json"),
-  claudeSkills: path.join(".claude", "skills"),
+  claudeSettings: ".claude/settings.json",
+  claudeSkills: ".claude/skills",
   codexDir: ".codex",
-  codexConfig: path.join(".codex", "config.toml"),
-  codexSkills: path.join(".codex", "skills"),
+  codexConfig: ".codex/config.toml",
+  codexSkills: ".codex/skills",
   agentsDir: ".agents",
-  agentsSkills: path.join(".agents", "skills"),
+  agentsSkills: ".agents/skills",
   report: "ai-switch-report.md",
   backupDir: ".ai-switch-backups"
 };
 
 const GLOBAL_RELATIVE_PATHS = {
-  backupDir: path.join(".ai-switch", "backups", "global")
+  backupDir: ".ai-switch/backups/global"
 };
 
 function projectPaths(cwd) {

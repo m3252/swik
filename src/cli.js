@@ -414,16 +414,16 @@ function realPathOrResolve(target) {
 async function ensureProjectLocalIgnores(cwd) {
   const git = gitContext(cwd);
   if (!git) return;
-  const projectRoot = realPathOrResolve(cwd);
+  const prefix = git.prefix;
 
   const entries = [
     {
-      pattern: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.backupDir), { directory: true }),
-      checkPath: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.backupDir, ".keep"))
+      pattern: `${prefix}${RELATIVE_PATHS.backupDir}/`,
+      checkPath: `${prefix}${RELATIVE_PATHS.backupDir}/.keep`
     },
     {
-      pattern: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.report)),
-      checkPath: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.report))
+      pattern: `${prefix}${RELATIVE_PATHS.report}`,
+      checkPath: `${prefix}${RELATIVE_PATHS.report}`
     }
   ].filter((entry) => entry.pattern && entry.checkPath && !gitCheckIgnored(git.root, entry.checkPath));
 
@@ -447,7 +447,8 @@ async function ensureProjectLocalIgnores(cwd) {
 function gitContext(cwd) {
   try {
     const root = gitOutput(cwd, ["rev-parse", "--show-toplevel"]);
-    return { root: realPathOrResolve(root), gitDir: gitDir(cwd) };
+    const prefix = gitOutput(cwd, ["rev-parse", "--show-prefix"]);
+    return { root: realPathOrResolve(root), gitDir: gitDir(cwd), prefix };
   } catch {
     return null;
   }
@@ -473,12 +474,6 @@ function gitCheckIgnored(root, relativePath) {
   } catch {
     return false;
   }
-}
-
-function repoRelativePath(root, target, options = {}) {
-  const relative = relativePath(root, target);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
-  return options.directory ? `${relative}/` : relative;
 }
 
 function relativePath(baseDir, target) {
