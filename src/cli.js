@@ -476,10 +476,13 @@ function gitCheckIgnored(root, relativePath) {
 }
 
 function repoRelativePath(root, target, options = {}) {
-  const relative = path.relative(root, target);
+  const relative = relativePath(root, target);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
-  const normalized = relative.split(path.sep).join("/");
-  return options.directory ? `${normalized}/` : normalized;
+  return options.directory ? `${relative}/` : relative;
+}
+
+function relativePath(baseDir, target) {
+  return path.relative(baseDir, target).split(path.sep).join("/");
 }
 
 function planCcToCodex(cwd, options = {}) {
@@ -723,7 +726,7 @@ function reportChange(baseDir, reportPath, from, to, changes, manualReviews = []
     "",
     "## Planned changes",
     "",
-    ...fileChanges(changes).map((change) => `- ${change.kind}: ${path.relative(baseDir, change.path)}`),
+    ...fileChanges(changes).map((change) => `- ${change.kind}: ${relativePath(baseDir, change.path)}`),
     "",
     "## Manual review needed",
     "",
@@ -778,7 +781,7 @@ function isCompiledInstructionSurface(surface, compiledSources) {
 function assertNoUnsafeOverwrites(changes, cwd, force = false) {
   const unsafe = fileChanges(changes)
     .filter((change) => isUnsafeOverwrite(change, cwd))
-    .map((change) => path.relative(cwd, change.path));
+    .map((change) => relativePath(cwd, change.path));
   if (unsafe.length > 0 && !force) {
     throw new Error(`Refusing to overwrite existing files without --force: ${unsafe.join(", ")}`);
   }
@@ -787,8 +790,8 @@ function assertNoUnsafeOverwrites(changes, cwd, force = false) {
 function assertNoUnsafeSyncOverwrites(changes, cwd, force = false) {
   const mergeSafe = new Set([RELATIVE_PATHS.report, RELATIVE_PATHS.codexConfig, RELATIVE_PATHS.mcpJson, RELATIVE_PATHS.claudeSettings]);
   const unsafe = fileChanges(changes)
-    .filter((change) => existsSync(change.path) && !mergeSafe.has(path.relative(cwd, change.path)))
-    .map((change) => path.relative(cwd, change.path));
+    .filter((change) => existsSync(change.path) && !mergeSafe.has(relativePath(cwd, change.path)))
+    .map((change) => relativePath(cwd, change.path));
   if (unsafe.length > 0 && !force) {
     throw new Error(`Refusing to overwrite existing files without --force: ${unsafe.join(", ")}`);
   }
@@ -796,7 +799,7 @@ function assertNoUnsafeSyncOverwrites(changes, cwd, force = false) {
 
 function isUnsafeOverwrite(change, cwd) {
   if (!existsSync(change.path)) return false;
-  const relative = path.relative(cwd, change.path);
+  const relative = relativePath(cwd, change.path);
   if (relative === RELATIVE_PATHS.report) return false;
   if (relative === RELATIVE_PATHS.codexConfig) return false;
   return true;
@@ -806,12 +809,12 @@ function planLabel(change, cwd) {
   if (change.kind === "skip" || change.kind === "manual-review") {
     return { action: change.kind, label: change.label, reason: change.reason };
   }
-  const relative = path.relative(cwd, change.path);
+  const relative = relativePath(cwd, change.path);
   if (change.report || relative === RELATIVE_PATHS.report) return { action: "report", label: relative };
   if (change.kind === "copy-dir") {
     return {
       action: existsSync(change.path) ? "merge" : "copy",
-      label: `${path.relative(cwd, change.from)} -> ${relative}`
+      label: `${relativePath(cwd, change.from)} -> ${relative}`
     };
   }
   if (!existsSync(change.path)) return { action: "create", label: relative };
@@ -865,7 +868,7 @@ function globalStatus(home = homedir(), env = process.env) {
 function formatProviderStatus(label, provider, cwd, expectedInstructionFile) {
   const instruction = provider.instructionFile ? path.basename(provider.instructionFile) : `no ${expectedInstructionFile}`;
   const config = provider.settingsFile ?? provider.configFile ?? provider.mcpFile;
-  const mcp = config ? `${plural(provider.mcpServerCount, "MCP server")} (${path.relative(cwd, config)})` : "no MCP config";
+  const mcp = config ? `${plural(provider.mcpServerCount, "MCP server")} (${relativePath(cwd, config)})` : "no MCP config";
   const skills = provider.skillsDir ? plural(provider.skillCount, "skill") : "no skills";
   return `${label.padEnd(12)} ${instruction}, ${mcp}, ${skills}`;
 }
@@ -880,7 +883,7 @@ function formatGlobalProviderStatus(label, provider, home, expectedInstructionFi
 
 function formatDisplayPath(home, file) {
   const relative = path.relative(home, file);
-  if (!relative.startsWith("..") && !path.isAbsolute(relative)) return `~/${relative}`;
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) return `~/${relative.split(path.sep).join("/")}`;
   return file;
 }
 

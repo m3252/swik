@@ -49,19 +49,42 @@ function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
-// Run `fn` with $HOME pointed at `home` (so os.homedir() resolves there) and
-// console.log silenced, then restore both. Keeps home-directory tests off the
-// developer's real ~ and out of the test log.
+function relPath(cwd, target) {
+  return path.relative(cwd, target).split(path.sep).join("/");
+}
+
+function pathEndsWith(target, suffix) {
+  return target?.split(path.sep).join("/").endsWith(suffix);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Run `fn` with home env vars pointed at `home` and console.log silenced, then
+// restore both. Keeps home-directory tests off the developer's real ~ and out
+// of the test log on POSIX and Windows.
 async function withFakeHome(home, fn) {
-  const originalHome = process.env.HOME;
+  const original = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    HOMEDRIVE: process.env.HOMEDRIVE,
+    HOMEPATH: process.env.HOMEPATH
+  };
   const originalLog = console.log;
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const parsedHome = path.parse(home);
+  process.env.HOMEDRIVE = parsedHome.root.replace(/[\\/]$/, "");
+  process.env.HOMEPATH = home.slice(process.env.HOMEDRIVE.length) || parsedHome.root;
   console.log = () => {};
   try {
     return await fn();
   } finally {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     console.log = originalLog;
   }
 }
@@ -104,7 +127,7 @@ test("merges Claude MCP servers from settings and project mcp files", () => {
   assert.match(sourceAnalysis.manualReviews.join("\n"), /exists in multiple Claude MCP sources/);
 
   const changes = planCcToCodex(dir);
-  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml"));
+  const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml"));
   assert.match(codexConfig.content, /\[mcp_servers\."settingsOnly"\]/);
   assert.match(codexConfig.content, /\[mcp_servers\."projectOnly"\]/);
 });
@@ -120,7 +143,7 @@ test("plans Claude to Codex instruction, MCP, skills, and report", () => {
   }));
 
   const changes = planCcToCodex(dir);
-  assert.deepEqual(changes.map((change) => path.relative(dir, change.path)), [
+  assert.deepEqual(changes.map((change) => relPath(dir, change.path)), [
     "AGENTS.md",
     ".codex/config.toml",
     ".agents/skills",
@@ -169,7 +192,7 @@ url = "https://example.com/sse"
 `);
 
   const changes = planSync(dir, { compile: true });
-  const relatives = changes.filter((change) => change.path).map((change) => path.relative(dir, change.path));
+  const relatives = changes.filter((change) => change.path).map((change) => relPath(dir, change.path));
   assert.ok(relatives.includes("AGENTS.md"));
   assert.ok(relatives.includes(".codex/config.toml"));
   assert.ok(relatives.includes(".mcp.json"));
@@ -177,7 +200,7 @@ url = "https://example.com/sse"
   assert.ok(relatives.includes(".claude/skills/fmt"));
   assert.ok(relatives.includes("ai-switch-report.md"));
 
-  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml")).content;
+  const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml")).content;
   assert.match(codexConfig, /\[mcp_servers\.remote\]/);
   assert.match(codexConfig, /\[mcp_servers\."docs"\]/);
 
@@ -264,7 +287,7 @@ test("inventories required credentials without leaking literal secret values", (
   assert.doesNotMatch(report, /ghp_REALsecret123/);
 
   // P0: the literal secret must NOT be written into the target config either.
-  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml")).content;
+  const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml")).content;
   assert.doesNotMatch(codexConfig, /ghp_REALsecret123/);
   assert.match(codexConfig, /"GITHUB_TOKEN" = "\$GITHUB_TOKEN"/);
   assert.match(codexConfig, /"LINEAR_API_KEY" = "\$LINEAR_API_KEY"/);
@@ -443,7 +466,7 @@ test("restore prunes empty directories created by migration", async () => {
   assert.equal(existsSync(path.join(dir, ".codex")), false);
 });
 
-test("skips special files while backing up and copying skill directories", async () => {
+test("skips special files while backing up and copying skill directories", { skip: process.platform === "win32" }, async () => {
   const dir = fixture();
   const specialDir = path.join(dir, ".codex", "skills", ".git");
   const specialPath = path.join(specialDir, "fsmonitor--daemon.ipc");
@@ -565,8 +588,8 @@ args = ["custom.js"]
   const env = { CLAUDE_CONFIG_DIR: claudeRoot, CODEX_HOME: codexRoot };
   const output = status(undefined, { global: true, home, env });
 
-  assert.match(output, new RegExp(`Claude Code\\s+CLAUDE.md, 1 MCP server \\(${claudeRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/settings.json\\), 1 skill`));
-  assert.match(output, new RegExp(`Codex\\s+AGENTS.md, 1 MCP server \\(${codexRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/config.toml\\), no skills`));
+  assert.match(output, new RegExp(`Claude Code\\s+CLAUDE.md, 1 MCP server \\(${escapeRegExp(path.join(claudeRoot, "settings.json"))}\\), 1 skill`));
+  assert.match(output, new RegExp(`Codex\\s+AGENTS.md, 1 MCP server \\(${escapeRegExp(path.join(codexRoot, "config.toml"))}\\), no skills`));
 
   const result = detectGlobal(home, env);
   assert.equal(result.claude.settingsFile, path.join(claudeRoot, "settings.json"));
@@ -574,9 +597,10 @@ args = ["custom.js"]
 });
 
 test("parses global and home options", () => {
-  const args = parseArgs(["status", "--global", "--home", "/tmp/example-home"]);
+  const home = path.resolve("example-home");
+  const args = parseArgs(["status", "--global", "--home", home]);
   assert.equal(args.global, true);
-  assert.equal(args.home, "/tmp/example-home");
+  assert.equal(args.home, home);
 });
 
 test("parses handoff output options", () => {
@@ -591,7 +615,7 @@ test("package exposes ai-switch and swik binaries", () => {
   assert.equal(pkg.bin.swik, "src/cli.js");
 });
 
-test("swik alias prints swik-oriented help", () => {
+test("swik alias prints swik-oriented help", { skip: process.platform === "win32" }, () => {
   const dir = fixture();
   const aliasPath = path.join(dir, "swik");
   symlinkSync(path.resolve("src/cli.js"), aliasPath);
@@ -669,7 +693,7 @@ test("converts Claude HTTP MCP servers to Codex url servers, flagging auth heade
   }));
 
   const changes = planCcToCodex(dir);
-  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml"));
+  const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml"));
   const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
 
   assert.match(codexConfig.content, /\[mcp_servers\."local"\]/);
@@ -737,7 +761,7 @@ args = ["existing.js"]
   }));
 
   const changes = planCcToCodex(dir);
-  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml"));
+  const codexConfig = changes.find((change) => pathEndsWith(change.path, ".codex/config.toml"));
   const report = changes.find((change) => change.path?.endsWith("ai-switch-report.md"));
 
   assert.equal([...codexConfig.content.matchAll(/\[mcp_servers\."docs"\]/g)].length, 1);
@@ -801,12 +825,12 @@ test("global cc->codex migrates allowlisted files and references secret env", ()
   writeFileSync(path.join(home, ".claude", "skills", "review", "SKILL.md"), "x\n");
 
   const changes = planCcToCodexGlobal(home, {});
-  const config = changes.find((c) => c.path?.endsWith(".codex/config.toml")).content;
+  const config = changes.find((c) => pathEndsWith(c.path, ".codex/config.toml")).content;
   assert.match(config, /\[mcp_servers\."linear"\]/);
   assert.match(config, /"LINEAR_API_KEY" = "\$LINEAR_API_KEY"/);
   assert.doesNotMatch(config, /lin_SECRET/);
-  assert.ok(changes.some((c) => c.path?.endsWith(".codex/AGENTS.md")));
-  assert.ok(changes.some((c) => c.kind === "copy-dir" && c.path?.endsWith(".agents/skills")));
+  assert.ok(changes.some((c) => pathEndsWith(c.path, ".codex/AGENTS.md")));
+  assert.ok(changes.some((c) => c.kind === "copy-dir" && pathEndsWith(c.path, ".agents/skills")));
 });
 
 test("global codex->cc merges into settings.json preserving other keys", async () => {
@@ -867,7 +891,7 @@ test("codex->cc reads skills from .agents/skills (newer location), not just .cod
 
   const changes = planCodexToCc(dir);
   assert.ok(changes.some((c) =>
-    c.kind === "copy-dir" && c.from.endsWith(".agents/skills") && c.path.endsWith(".claude/skills")));
+    c.kind === "copy-dir" && pathEndsWith(c.from, ".agents/skills") && pathEndsWith(c.path, ".claude/skills")));
 });
 
 test("cc->codex writes skills to .agents/skills (preferred Codex location)", () => {
@@ -877,8 +901,8 @@ test("cc->codex writes skills to .agents/skills (preferred Codex location)", () 
 
   const changes = planCcToCodex(dir);
   assert.ok(changes.some((c) =>
-    c.kind === "copy-dir" && c.from.endsWith(".claude/skills") && c.path.endsWith(".agents/skills")));
-  assert.ok(!changes.some((c) => c.path?.endsWith(".codex/skills")));
+    c.kind === "copy-dir" && pathEndsWith(c.from, ".claude/skills") && pathEndsWith(c.path, ".agents/skills")));
+  assert.ok(!changes.some((c) => pathEndsWith(c.path, ".codex/skills")));
 });
 
 test("HTTP MCP round-trips: cc http url -> codex url -> cc http", () => {
@@ -886,7 +910,7 @@ test("HTTP MCP round-trips: cc http url -> codex url -> cc http", () => {
   writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
     mcpServers: { gw: { type: "http", url: "https://x.example/mcp" } }
   }));
-  const codexConfig = planCcToCodex(dir).find((c) => c.path?.endsWith(".codex/config.toml")).content;
+  const codexConfig = planCcToCodex(dir).find((c) => pathEndsWith(c.path, ".codex/config.toml")).content;
   assert.match(codexConfig, /\[mcp_servers\."gw"\]/);
   assert.match(codexConfig, /url = "https:\/\/x\.example\/mcp"/);
 
@@ -994,7 +1018,7 @@ test("Claude sse url servers are not auto-converted (only http)", () => {
     }
   }));
   const changes = planCcToCodex(dir);
-  const config = changes.find((c) => c.path?.endsWith(".codex/config.toml")).content;
+  const config = changes.find((c) => pathEndsWith(c.path, ".codex/config.toml")).content;
   const report = changes.find((c) => c.path?.endsWith("ai-switch-report.md")).content;
   assert.doesNotMatch(config, /streamy/);
   assert.match(config, /\[mcp_servers\."webby"\]/);
@@ -1049,13 +1073,13 @@ test("codex->cc report has no Claude-surface gap section", () => {
   assert.doesNotMatch(report, /Other Claude surfaces detected/);
 });
 
-test("audit follows valid symlink dirs but skips broken ones without crashing", () => {
+test("audit follows valid symlink dirs but skips broken ones without crashing", { skip: process.platform === "win32" }, () => {
   const dir = fixture();
   mkdirSync(path.join(dir, ".claude", "agents"), { recursive: true });
   mkdirSync(path.join(dir, "real-agents", "sub"), { recursive: true });
   writeFileSync(path.join(dir, "CLAUDE.md"), "p\n");
   symlinkSync(path.join(dir, "real-agents", "sub"), path.join(dir, ".claude", "agents", "shared")); // valid -> dir
-  symlinkSync("/nonexistent/target", path.join(dir, ".claude", "agents", "broken")); // broken
+  symlinkSync(path.join(dir, "nonexistent", "target"), path.join(dir, ".claude", "agents", "broken")); // broken
 
   let surfaces;
   assert.doesNotThrow(() => { surfaces = auditSurfaces(dir); });
@@ -1192,7 +1216,7 @@ test("handoff writes CODEX-HANDOFF.md and protects existing files", async () => 
   await handoff(dir, { force: true });
 });
 
-test("handoff refuses output through a symlinked parent directory", async () => {
+test("handoff refuses output through a symlinked parent directory", { skip: process.platform === "win32" }, async () => {
   const dir = fixture();
   const outside = fixture();
   symlinkSync(outside, path.join(dir, "docs"));
