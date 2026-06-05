@@ -8,7 +8,7 @@
 
 [English](../README.md) · [한국어](README.ko.md) · **中文** · [日本語](README.ja.md)
 
-`ai-switch` 是一个零依赖 CLI，用来在 Claude Code 与 Codex 之间切换项目，而不用每次手动重建同一套配置。它只迁移可移植的项目配置，并报告需要人工处理的内容。它绝不触碰账号、会话、聊天记录或密钥值。
+`ai-switch` 是一个零依赖 CLI，用来在 Claude Code 与 Codex 之间切换项目，而不用每次手动重建同一套配置。日常使用的命令是 **`swik`**；npm 包使用作用域名 `@seungchan.m/ai-switch` 以避免名称冲突。它只迁移可移植的项目配置，并报告需要人工处理的内容。它绝不触碰账号、会话、聊天记录或密钥值。
 
 ## 立即试用
 
@@ -25,14 +25,14 @@ npx @seungchan.m/ai-switch convert cc codex --dry-run
 npm install -g @seungchan.m/ai-switch
 ```
 
-安装后两个命令都可用：
+安装后使用 `swik`：
 
 ```sh
 swik status
-ai-switch status
+swik sync --compile --dry-run
 ```
 
-`swik` 是短别名。`ai-switch` 仍然是完整命令。
+完整命令 `ai-switch` 仍然可用，但文档示例优先使用 `swik`，以减少与非作用域 npm 包的混淆。
 
 ## 常用流程
 
@@ -109,6 +109,10 @@ swik restore latest --global
 | 指令 | `CLAUDE.md` | `AGENTS.md` | `--compile` 可把 Claude 指令层级合成一个文件 |
 | MCP 服务器 | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` | stdio 与 HTTP URL 服务器；认证需人工确认 |
 | 技能 | `.claude/skills/` | `.agents/skills/` | 复制为本地技能目录 |
+
+## 兼容性基线
+
+ai-switch 0.8.x 的测试 fixture 以 2026-06 的 Claude Code 2.1.162 与 Codex CLI 0.136.0 项目配置形状为基准。自动转换只覆盖上表中的可移植子集；其他字段会进入报告或保留为手动处理。
 
 设计上不迁移：
 
@@ -187,7 +191,8 @@ codex = codex
 - `--dry-run` 只打印计划，不写入。
 - 迁移写入需要 `--yes`。
 - 不加 `--force` 不覆盖已有文件。
-- 每次迁移都会把原文件快照到 `.ai-switch-backups/<timestamp>/`（已 gitignore）。
+- 每次迁移都会把原文件快照到 `.ai-switch-backups/<timestamp>/`。
+- 在 Git worktree 内写入项目文件前，会把 `.ai-switch-backups/` 和 `ai-switch-report.md` 加到 `.git/info/exclude`。
 - `restore latest` 会恢复原文件并删除迁移创建的文件。
 - 如果迁移创建的文件之后被你修改过，restore 会拒绝删除，除非传入 `--force`。
 
@@ -199,7 +204,7 @@ MCP 服务器常需要 API key 或 token。ai-switch 只迁移接线：服务器
 
 如果源配置里有字面量 env 值，ai-switch 会在目标配置中把它改写为 `$NAME` 引用，并在 `ai-switch-report.md` 中列出变量名。
 
-备份会保留原始文件以便精确回滚。如果源配置本身已经包含字面量密钥，本地备份也可能包含它们。项目备份位于 `.ai-switch-backups/`，全局备份位于 `~/.ai-switch/backups/global/`，两者都已 gitignore。
+备份会保留原始文件以便精确回滚。如果源配置本身已经包含字面量密钥，本地备份也可能包含它们。项目备份位于 `.ai-switch-backups/`；在 Git 仓库中写入前会把该目录和 `ai-switch-report.md` 加到 `.git/info/exclude`。全局备份位于项目外的 `~/.ai-switch/backups/global/`。
 
 ## Compile Instructions
 
@@ -264,6 +269,7 @@ swik handoff --from codex --to cc
 - Claude custom agents、commands、hooks、permissions、output styles 会被报告，而不是假装可移植。
 - 原始聊天记录和私有会话从不迁移。
 - `--global` 仅限白名单，绝不触碰 auth/session/state/log/cache 文件。
+- Codex TOML 写入目前偏 append-only。当前零依赖解析器只覆盖支持的 MCP 子集；要保留注释/未知字段，应先切换到 AST-backed TOML parser/writer。
 
 ## 路线图
 
@@ -274,8 +280,9 @@ swik handoff --from codex --to cc
 - [x] `convert --compile` — 展平 CLAUDE.md 层级（0.6.0）
 - [x] `handoff` — git 派生的上下文脚手架（0.7.0）
 - [x] `sync` — 安全的双向项目配置 reconcile（0.8.0）
+- [x] 为备份和报告加入项目本地 `.git/info/exclude` 保护（0.8.2）
 - [ ] Gemini CLI 与 Cursor 适配器
-- [ ] 写 Codex TOML 时保留注释/未知字段
+- [ ] 在保留 Codex TOML 注释/未知字段前引入 AST-backed parser/writer
 - [ ] 带显式危险警告的 opt-in `--include-env-values`
 
 ## 贡献

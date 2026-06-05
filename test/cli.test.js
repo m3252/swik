@@ -302,6 +302,39 @@ test("writes migration with backup only when confirmed", async () => {
   assert.ok(existsSync(path.join(result.backupDir, "CLAUDE.md")));
 });
 
+test("confirmed project writes locally gitignore backups and reports", async () => {
+  if (!hasGit()) return;
+  const dir = fixture();
+  git(dir, ["init"]);
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");
+
+  await convert("cc", "codex", { cwd: dir, yes: true });
+
+  const exclude = readFileSync(path.join(dir, ".git", "info", "exclude"), "utf8");
+  assert.match(exclude, /^# ai-switch local ignores$/m);
+  assert.match(exclude, /^\.ai-switch-backups\/$/m);
+  assert.match(exclude, /^ai-switch-report\.md$/m);
+  assert.doesNotThrow(() => git(dir, ["check-ignore", ".ai-switch-backups/example"]));
+  assert.doesNotThrow(() => git(dir, ["check-ignore", "ai-switch-report.md"]));
+});
+
+test("local git ignores are scoped when writing from a repo subdirectory", async () => {
+  if (!hasGit()) return;
+  const dir = fixture();
+  const app = path.join(dir, "packages", "app");
+  mkdirSync(app, { recursive: true });
+  git(dir, ["init"]);
+  writeFileSync(path.join(app, "CLAUDE.md"), "Use short responses.\n");
+
+  await convert("cc", "codex", { cwd: app, yes: true });
+
+  const exclude = readFileSync(path.join(dir, ".git", "info", "exclude"), "utf8");
+  assert.match(exclude, /^packages\/app\/\.ai-switch-backups\/$/m);
+  assert.match(exclude, /^packages\/app\/ai-switch-report\.md$/m);
+  assert.doesNotThrow(() => git(dir, ["check-ignore", "packages/app/.ai-switch-backups/example"]));
+  assert.doesNotThrow(() => git(dir, ["check-ignore", "packages/app/ai-switch-report.md"]));
+});
+
 test("sync writes safe missing targets with backup only when confirmed", async () => {
   const dir = fixture();
   writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");

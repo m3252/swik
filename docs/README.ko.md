@@ -8,7 +8,7 @@
 
 [English](../README.md) · **한국어** · [中文](README.zh.md) · [日本語](README.ja.md)
 
-Claude Code와 Codex를 오갈 때 손으로 다시 만들어야 하는 **프로젝트 단위 설정**을 옮겨주는 의존성 0짜리 CLI입니다. 모든 쓰기는 백업되고, 모든 실행은 `--dry-run`으로 미리 볼 수 있으며, 안전하게 자동 변환할 수 없는 건 **버리지 않고 리포트**합니다.
+Claude Code와 Codex를 오갈 때 손으로 다시 만들어야 하는 **프로젝트 단위 설정**을 옮겨주는 의존성 0짜리 CLI입니다. 설치 후 일상적으로 쓰는 명령은 **`swik`**이고, npm 패키지는 이름 충돌을 피하기 위해 `@seungchan.m/ai-switch`로 배포됩니다. 모든 쓰기는 백업되고, 모든 실행은 `--dry-run`으로 미리 볼 수 있으며, 안전하게 자동 변환할 수 없는 건 **버리지 않고 리포트**합니다.
 
 계정, 세션, 채팅 기록, 비밀값에는 절대 손대지 않습니다.
 
@@ -33,14 +33,14 @@ npx @seungchan.m/ai-switch convert cc codex --dry-run
 npm install -g @seungchan.m/ai-switch   # Node 20+
 ```
 
-설치 후에는 둘 중 아무 명령이나 쓰면 됩니다:
+설치 후에는 `swik`를 쓰면 됩니다:
 
 ```sh
 swik status
-ai-switch status
+swik sync --compile --dry-run
 ```
 
-`swik`는 짧은 alias이고, `ai-switch`는 기존 전체 명령입니다.
+`ai-switch` 전체 명령도 계속 지원하지만, 문서 예시는 검색/설치 혼동을 줄이기 위해 `swik` 중심으로 씁니다.
 
 ## 자주 쓰는 흐름
 
@@ -127,7 +127,8 @@ Codex        no AGENTS.md, no MCP config, no skills
 - `--dry-run`은 계획만 출력하고 아무것도 쓰지 않습니다.
 - 마이그레이션 쓰기는 `--yes`가 필요합니다.
 - 기존 파일은 `--force` 없이 **덮어쓰지 않습니다**.
-- 모든 마이그레이션은 원본을 `.ai-switch-backups/<timestamp>/`에 스냅샷합니다 (gitignore됨).
+- 모든 마이그레이션은 원본을 `.ai-switch-backups/<timestamp>/`에 스냅샷합니다.
+- Git worktree 안에서 프로젝트에 쓰기 전 `.ai-switch-backups/`와 `ai-switch-report.md`를 `.git/info/exclude`에 추가합니다.
 - `restore latest`는 마이그레이션을 되돌립니다 — 원본 복원, 생성한 파일 제거 — 그리고 그 이후 직접 수정한 생성 파일은 (`--force` 없이는) 삭제를 거부합니다.
 
 `.codex/config.toml`은 덮어쓰기 규칙의 유일한 예외입니다: 기존 내용을 보존하고 충돌하지 않는 MCP 서버만 **추가**합니다.
@@ -146,6 +147,8 @@ ai-switch restore latest --global
 `--global`은 **허용목록 전용**입니다: `CLAUDE.md`/`AGENTS.md`, `settings.json#mcpServers`/`config.toml#mcp_servers`, `skills/`만 건드립니다. `auth.json`, `sessions/`, `state_*.sqlite`, 로그, 캐시는 읽지도 쓰지도 않습니다. 설정 시 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`를 따릅니다. 전역 백업은 `~/.ai-switch/backups/global/`에 있습니다.
 
 ## 지원 매트릭스
+
+호환성 기준: ai-switch 0.8.x 테스트 fixture는 2026-06 기준 Claude Code 2.1.162와 Codex CLI 0.136.0의 프로젝트 설정 형태를 기준으로 합니다. 아래에 명시한 이식 가능한 부분집합만 자동 변환합니다.
 
 | 기능 | cc → codex | codex → cc |
 | --- | --- | --- |
@@ -176,7 +179,7 @@ ai-switch restore latest --global
 
 MCP 서버는 비밀값(API 키, 토큰)이 필요합니다. ai-switch는 **배선**만 옮깁니다 — 서버 이름, 명령, 인자, 환경변수 *이름*. 비밀 **값**은 다른 도구의 설정이나 리포트에 절대 복사하지 않습니다. 소스에 있던 리터럴 값은 **`$NAME` 참조로 다시 써서** `ai-switch-report.md`에 나열하므로, 새 도구에 같은 환경변수를 설정하면 됩니다 (유출됐다면 교체하세요).
 
-> **백업과 비밀값.** 백업은 **원본** 파일을 보존해 `restore`가 정확히 되돌리게 합니다. 만약 *소스* 설정에 이미 리터럴 비밀값이 있다면 로컬 백업(`.ai-switch-backups/`, `~/.ai-switch/backups/global/`; 둘 다 gitignore됨)에도 들어갈 수 있고, 리포트는 항상 이를 알립니다. 보장: ai-switch는 *다른 도구의* 설정이나 리포트에 리터럴 값을 절대 쓰지 않습니다.
+> **백업과 비밀값.** 백업은 **원본** 파일을 보존해 `restore`가 정확히 되돌리게 합니다. 만약 *소스* 설정에 이미 리터럴 비밀값이 있다면 로컬 백업에도 들어갈 수 있고, 리포트는 항상 이를 알립니다. 프로젝트 백업은 `.ai-switch-backups/`에 있으며 Git 저장소에서는 쓰기 전에 `.git/info/exclude`에 추가됩니다. 전역 백업은 `~/.ai-switch/backups/global/`에 있습니다. 보장: ai-switch는 *다른 도구의* 설정이나 리포트에 리터럴 값을 절대 쓰지 않습니다.
 
 ## `--compile`: 지시문 계층 평탄화
 
@@ -226,6 +229,7 @@ Not portable:
 - 자동 MCP 변환은 stdio(`command`/`args`/`env`)와 HTTP(`url`) 서버를 커버합니다; 인증 헤더/bearer 토큰은 수동 설정용으로 표시되고 복사되지 않습니다.
 - 원시 채팅 기록과 비공개 세션은 절대 마이그레이션하지 않습니다 — 대신 `handoff`로 안전한 git 기반 스캐폴드를 쓰세요.
 - `--global`은 허용목록 전용이며 auth/session/state/log/cache 파일을 건드리지 않습니다.
+- Codex TOML 쓰기는 현재 append 중심입니다. 지금의 무의존 파서는 지원 MCP 부분집합을 다루며, 주석 보존 rewrite는 AST 기반 TOML 파서를 도입한 뒤 진행해야 합니다.
 
 ## 로드맵
 
@@ -236,8 +240,9 @@ Not portable:
 - [x] `convert --compile` — CLAUDE.md 계층 평탄화 (0.6.0)
 - [x] `handoff` — git 기반 컨텍스트 스캐폴드 (0.7.0)
 - [x] `sync` — 안전한 양방향 프로젝트 설정 reconcile (0.8.0)
+- [x] 백업/리포트용 프로젝트 로컬 `.git/info/exclude` 보호 (0.8.2)
 - [ ] Gemini CLI · Cursor 어댑터
-- [ ] Codex TOML 작성 시 주석/미지 필드 보존
+- [ ] Codex TOML 주석/미지 필드 보존 전에 AST 기반 parser/writer 도입
 - [ ] 명시적 위험 경고를 둔 opt-in `--include-env-values`
 
 ## 기여

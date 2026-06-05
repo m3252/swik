@@ -8,7 +8,7 @@
 
 [English](../README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · **日本語**
 
-`ai-switch` は、Claude Code と Codex の間でプロジェクトを切り替えるときに、同じ設定を手で作り直さなくて済むようにするゼロ依存 CLI です。移植可能なプロジェクト設定だけを移行し、手作業が必要なものはレポートします。アカウント、セッション、チャット履歴、シークレット値には触れません。
+`ai-switch` は、Claude Code と Codex の間でプロジェクトを切り替えるときに、同じ設定を手で作り直さなくて済むようにするゼロ依存 CLI です。日常的に使うコマンドは **`swik`** で、npm package は名前衝突を避けるため `@seungchan.m/ai-switch` として公開されています。移植可能なプロジェクト設定だけを移行し、手作業が必要なものはレポートします。アカウント、セッション、チャット履歴、シークレット値には触れません。
 
 ## すぐ試す
 
@@ -25,14 +25,14 @@ npx @seungchan.m/ai-switch convert cc codex --dry-run
 npm install -g @seungchan.m/ai-switch
 ```
 
-インストール後はどちらのコマンドも使えます:
+インストール後は `swik` を使います:
 
 ```sh
 swik status
-ai-switch status
+swik sync --compile --dry-run
 ```
 
-`swik` は短い alias です。`ai-switch` は引き続き完全なコマンド名です。
+完全なコマンド名 `ai-switch` も引き続き使えますが、文書の例では非 scoped npm package との混同を避けるため `swik` を優先します。
 
 ## よく使う流れ
 
@@ -109,6 +109,10 @@ swik restore latest --global
 | 指示 | `CLAUDE.md` | `AGENTS.md` | `--compile` で Claude の指示階層を 1 ファイルにまとめられます |
 | MCP サーバー | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` | stdio と HTTP URL サーバー。認証は手作業で確認 |
 | スキル | `.claude/skills/` | `.agents/skills/` | ローカルスキルフォルダとしてコピー |
+
+## 互換性ベースライン
+
+ai-switch 0.8.x の test fixture は、2026-06 時点の Claude Code 2.1.162 と Codex CLI 0.136.0 の project config shape を基準にしています。自動変換するのは上表の portable subset だけで、それ以外のフィールドはレポートまたは手作業扱いです。
 
 設計上、対象外のもの:
 
@@ -187,7 +191,8 @@ codex = codex
 - `--dry-run` は計画だけを表示し、書き込みません。
 - 移行の書き込みには `--yes` が必要です。
 - 既存ファイルは `--force` なしでは上書きしません。
-- すべての移行で元ファイルを `.ai-switch-backups/<timestamp>/` にスナップショットします（gitignore 済み）。
+- すべての移行で元ファイルを `.ai-switch-backups/<timestamp>/` にスナップショットします。
+- Git worktree 内でプロジェクトに書き込む前に、`.ai-switch-backups/` と `ai-switch-report.md` を `.git/info/exclude` に追加します。
 - `restore latest` は元ファイルを復元し、移行で作られたファイルを削除します。
 - 移行後にあなたが編集した生成ファイルは、`--force` なしでは削除を拒否します。
 
@@ -199,7 +204,7 @@ MCP サーバーには API key や token が必要なことがあります。ai-
 
 ソース設定に env の生値がある場合、ai-switch はターゲット設定では `$NAME` 参照に書き換え、その変数を `ai-switch-report.md` に列挙します。
 
-バックアップは正確なロールバックのために元ファイルを保持します。ソース設定がすでにシークレットの生値を含む場合、ローカルバックアップにも含まれる可能性があります。プロジェクトバックアップは `.ai-switch-backups/`、グローバルバックアップは `~/.ai-switch/backups/global/` に置かれ、どちらも gitignore 済みです。
+バックアップは正確なロールバックのために元ファイルを保持します。ソース設定がすでにシークレットの生値を含む場合、ローカルバックアップにも含まれる可能性があります。プロジェクトバックアップは `.ai-switch-backups/` に置かれ、Git repository では書き込み前にこのディレクトリと `ai-switch-report.md` を `.git/info/exclude` に追加します。グローバルバックアップはプロジェクト外の `~/.ai-switch/backups/global/` にあります。
 
 ## Compile Instructions
 
@@ -264,6 +269,7 @@ git から自動入力:
 - Claude custom agents、commands、hooks、permissions、output styles は、移植可能なふりをせずレポートします。
 - 生のチャット履歴とプライベートセッションは移行しません。
 - `--global` は許可リストのみで、auth/session/state/log/cache ファイルには触れません。
+- Codex TOML の書き込みは現在 append-oriented です。今のゼロ依存 parser は対応 MCP subset を扱うもので、コメント/未知フィールド保持には先に AST-backed TOML parser/writer が必要です。
 
 ## ロードマップ
 
@@ -274,8 +280,9 @@ git から自動入力:
 - [x] `convert --compile` — CLAUDE.md 階層の平坦化（0.6.0）
 - [x] `handoff` — git 由来のコンテキスト雛形（0.7.0）
 - [x] `sync` — 安全な双方向プロジェクト設定 reconcile（0.8.0）
+- [x] バックアップとレポートのための project-local `.git/info/exclude` 保護（0.8.2）
 - [ ] Gemini CLI と Cursor のアダプター
-- [ ] Codex TOML 書き込み時にコメント/未知フィールドを保持
+- [ ] Codex TOML のコメント/未知フィールド保持前に AST-backed parser/writer を導入
 - [ ] 明示的な危険警告付きの opt-in `--include-env-values`
 
 ## コントリビュート

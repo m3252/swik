@@ -8,7 +8,7 @@
 
 **English** · [한국어](docs/README.ko.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md)
 
-`ai-switch` is a zero-dependency CLI for switching projects between Claude Code and OpenAI Codex CLI without rebuilding the same setup by hand. It migrates only portable agent config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
+`ai-switch` is a zero-dependency CLI for switching projects between Claude Code and OpenAI Codex CLI without rebuilding the same setup by hand. The command you run day to day is **`swik`**; the npm package is scoped as `@seungchan.m/ai-switch` to avoid name collisions. It migrates only portable agent config and reports anything that needs manual attention. It never touches accounts, sessions, chat history, or secret values.
 
 ## Try It
 
@@ -25,14 +25,14 @@ Install globally:
 npm install -g @seungchan.m/ai-switch
 ```
 
-Then use either binary:
+Then use `swik`:
 
 ```sh
 swik status
-ai-switch status
+swik sync --compile --dry-run
 ```
 
-`swik` is the short alias. `ai-switch` remains the full command.
+`ai-switch` remains available as the full command, but examples use `swik` to avoid confusion with the unrelated unscoped npm package.
 
 ## Common Workflows
 
@@ -112,6 +112,19 @@ swik restore latest --global
 | MCP servers | `.mcp.json`, `.claude/settings.json` | `.codex/config.toml` | stdio and HTTP URL servers; auth reviewed manually |
 | Skills | `.claude/skills/` | `.agents/skills/` | copied as local skill folders |
 
+## Compatibility
+
+ai-switch is intentionally fixture-pinned instead of claiming full Claude/Codex compatibility. The 0.8.x contract is tested in this repo against Claude Code 2.1.162 and Codex CLI 0.136.0 project config shapes as of 2026-06.
+
+| Config surface | Auto-converted | Manual/report only |
+| --- | --- | --- |
+| Codex MCP in `.codex/config.toml` | `command`, `args`, inline or nested `env`, HTTP `url` | `cwd`, `enabled`, `required`, `timeout`, tool allow/deny fields, OAuth, `bearer_token_env_var`, `http_headers`, unknown fields |
+| Claude MCP in `.mcp.json` / `.claude/settings.json#mcpServers` | stdio `command`/`args`/`env`, HTTP `type: "http"` + `url` | `sse`/`ws`/SDK/proxy transports, OAuth, auth headers, duplicate names, local absolute paths |
+| Instructions | `CLAUDE.md`; Claude hierarchy with `--compile` | local/private files unless `--include-local`, unsafe `@include` targets |
+| Skills | local skill folders copied as files | runtime behavior, tool permissions, hooks, model choices |
+
+Unknown fields are preserved only when ai-switch appends to an existing config. They are not semantically translated unless listed above.
+
 Out of scope by design:
 
 - accounts and login state
@@ -189,7 +202,8 @@ Conservative by default:
 - `--dry-run` prints the plan and writes nothing.
 - Migration writes require `--yes`.
 - Existing files are not overwritten without `--force`.
-- Every migration snapshots originals to `.ai-switch-backups/<timestamp>/` (gitignored).
+- Every migration snapshots originals to `.ai-switch-backups/<timestamp>/`.
+- In Git worktrees, project writes add `.ai-switch-backups/` and `ai-switch-report.md` to `.git/info/exclude` before writing.
 - `restore latest` restores originals and removes files created by the migration.
 - Restore refuses to delete migration-created files you edited after migration unless you pass `--force`.
 
@@ -201,7 +215,7 @@ MCP servers often need API keys or tokens. ai-switch migrates the wiring — ser
 
 If the source config has a literal env value, ai-switch rewrites it as a `$NAME` reference in the target config and lists that variable in `ai-switch-report.md`.
 
-Backups preserve original files for exact rollback. If your source config already contains literal secrets, the local backup may contain them too. Project backups live in `.ai-switch-backups/`; global backups live in `~/.ai-switch/backups/global/`. Both are gitignored.
+Backups preserve original files for exact rollback. If your source config already contains literal secrets, the local backup may contain them too. Project backups live in `.ai-switch-backups/`; project writes inside Git add `.ai-switch-backups/` and `ai-switch-report.md` to `.git/info/exclude` before writing. Global backups live outside the project at `~/.ai-switch/backups/global/`.
 
 ## Compile Instructions
 
@@ -266,6 +280,7 @@ Only the project basename is recorded, not your absolute local path.
 - Claude custom agents, commands, hooks, permissions, and output styles are reported rather than pretended to be portable.
 - Raw chat history and private sessions are never migrated.
 - `--global` is allowlist-only and never touches auth/session/state/log/cache files.
+- Codex TOML writing is append-oriented. The current zero-dependency parser handles the supported MCP subset; comment-preserving rewrites require an AST-backed TOML parser before that roadmap item should ship.
 
 ## Roadmap
 
@@ -276,8 +291,9 @@ Only the project basename is recorded, not your absolute local path.
 - [x] `convert --compile` — flatten the CLAUDE.md hierarchy (0.6.0)
 - [x] `handoff` — git-derived context scaffold (0.7.0)
 - [x] `sync` — safe bidirectional project config reconcile (0.8.0)
+- [x] Project-local `.git/info/exclude` protection for backups and reports (0.8.2)
 - [ ] Adapters for Gemini CLI and Cursor
-- [ ] Preserve comments / unknown fields when writing Codex TOML
+- [ ] Move Codex TOML editing to an AST-backed parser before preserving comments / unknown fields
 - [ ] Opt-in `--include-env-values` behind an explicit danger warning
 
 ## Contributing

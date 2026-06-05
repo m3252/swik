@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -226,6 +227,7 @@ async function convert(fromRaw, toRaw, options) {
   }
 
   assertNoUnsafeOverwrites(changes, options.cwd, options.force);
+  await ensureProjectLocalIgnores(options.cwd);
 
   const backupDir = await makeBackup(options.cwd, changes);
   for (const change of fileChanges(changes)) {
@@ -252,6 +254,7 @@ async function sync(cwd, options = {}) {
   }
 
   assertNoUnsafeSyncOverwrites(changes, cwd, options.force);
+  await ensureProjectLocalIgnores(cwd);
 
   const backupDir = await makeBackup(cwd, changes);
   for (const change of fileChanges(changes)) {
@@ -406,6 +409,77 @@ function realPathOrResolve(target) {
   } catch {
     return path.resolve(target);
   }
+}
+
+async function ensureProjectLocalIgnores(cwd) {
+  const git = gitContext(cwd);
+  if (!git) return;
+  const projectRoot = realPathOrResolve(cwd);
+
+  const entries = [
+    {
+      pattern: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.backupDir), { directory: true }),
+      checkPath: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.backupDir, ".keep"))
+    },
+    {
+      pattern: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.report)),
+      checkPath: repoRelativePath(git.root, path.join(projectRoot, RELATIVE_PATHS.report))
+    }
+  ].filter((entry) => entry.pattern && entry.checkPath && !gitCheckIgnored(git.root, entry.checkPath));
+
+  if (entries.length === 0) return;
+
+  const excludePath = path.join(git.gitDir, "info", "exclude");
+  const current = readText(excludePath) ?? "";
+  const existing = new Set(current.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
+  const missing = entries.filter((entry) => !existing.has(entry.pattern));
+  if (missing.length === 0) return;
+
+  let next = current;
+  if (next && !next.endsWith("\n")) next += "\n";
+  if (!existing.has("# ai-switch local ignores")) next += "# ai-switch local ignores\n";
+  for (const entry of missing) next += `${entry.pattern}\n`;
+
+  await mkdir(path.dirname(excludePath), { recursive: true });
+  await writeFile(excludePath, next, "utf8");
+}
+
+function gitContext(cwd) {
+  try {
+    const root = gitOutput(cwd, ["rev-parse", "--show-toplevel"]);
+    return { root: realPathOrResolve(root), gitDir: gitDir(cwd) };
+  } catch {
+    return null;
+  }
+}
+
+function gitDir(cwd) {
+  try {
+    return path.resolve(gitOutput(cwd, ["rev-parse", "--absolute-git-dir"]));
+  } catch {
+    const raw = gitOutput(cwd, ["rev-parse", "--git-dir"]);
+    return path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
+  }
+}
+
+function gitOutput(cwd, args) {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+}
+
+function gitCheckIgnored(root, relativePath) {
+  try {
+    execFileSync("git", ["-C", root, "check-ignore", "--quiet", "--", relativePath], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function repoRelativePath(root, target, options = {}) {
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+  const normalized = relative.split(path.sep).join("/");
+  return options.directory ? `${normalized}/` : normalized;
 }
 
 function planCcToCodex(cwd, options = {}) {
@@ -664,7 +738,7 @@ function reportChange(baseDir, reportPath, from, to, changes, manualReviews = []
     "",
     "- Secrets and account sessions are intentionally not migrated.",
     "- Literal env values are replaced with `$NAME` in the migrated config and this report; they are never written into the target tool. Verify paths before use.",
-    "- Backups preserve your original allowlisted files (project: `.ai-switch-backups/`, global: `~/.ai-switch/backups/global/`, both gitignored). If those files contain literal secrets, the backup will too.",
+    "- Backups preserve your original allowlisted files. Project writes add `.ai-switch-backups/` and `ai-switch-report.md` to `.git/info/exclude` when run inside a Git worktree; global backups live outside the project at `~/.ai-switch/backups/global/`. If backed-up files contain literal secrets, the backup will too.",
     "- Skills are copied as files, but runtime compatibility depends on each agent."
   ];
   return {
@@ -977,6 +1051,7 @@ async function main() {
   }
   else if (command === "backup") {
     assertProjectWriteScope(args.cwd);
+    await ensureProjectLocalIgnores(args.cwd);
     console.log(await makeBackup(args.cwd));
   }
   else if (command === "backups") {
