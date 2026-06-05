@@ -36,6 +36,15 @@ ai-switch status
 
 ## Common Workflows
 
+### Keep Both Tools in Sync
+
+Create anything missing on either side, merge safe MCP/skill additions, and report conflicts without overwriting them:
+
+```sh
+swik sync --compile --dry-run
+swik sync --compile --yes
+```
+
 ### Claude Code to Codex
 
 Preview first:
@@ -143,6 +152,7 @@ Not portable:
 | Machine-readable detection | `swik detect` |
 | Full Claude surface audit | `swik audit` |
 | Health check | `swik doctor` |
+| Sync both tools safely | `swik sync --compile --dry-run` |
 | Preview Claude Code -> Codex | `swik convert cc codex --compile --dry-run` |
 | Apply Claude Code -> Codex | `swik convert cc codex --compile --yes` |
 | Preview Codex -> Claude Code | `swik convert codex cc --dry-run` |
@@ -265,6 +275,7 @@ Only the project basename is recorded, not your absolute local path.
 - [x] `audit` — classify surfaces migrated / manual / not-portable (0.5.0)
 - [x] `convert --compile` — flatten the CLAUDE.md hierarchy (0.6.0)
 - [x] `handoff` — git-derived context scaffold (0.7.0)
+- [x] `sync` — safe bidirectional project config reconcile (0.8.0)
 - [ ] Adapters for Gemini CLI and Cursor
 - [ ] Preserve comments / unknown fields when writing Codex TOML
 - [ ] Opt-in `--include-env-values` behind an explicit danger warning

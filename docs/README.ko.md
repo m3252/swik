@@ -44,6 +44,13 @@ ai-switch status
 
 ## 자주 쓰는 흐름
 
+양쪽 도구 안전하게 동기화:
+
+```sh
+swik sync --compile --dry-run
+swik sync --compile --yes
+```
+
 Claude Code에서 Codex로:
 
 ```sh
@@ -101,6 +108,7 @@ report   ai-switch-report.md
 | `detect` | 감지된 파일을 기계가 읽는 JSON으로 |
 | `audit` | 모든 Claude 영역을 migrated / manual / not-portable로 분류 |
 | `doctor` | 문제·경고 리포트 |
+| `sync` | 양쪽에 없는 설정만 안전하게 생성/추가하고 충돌은 리포트 |
 | `convert <from> <to>` | 설정 마이그레이션 (`cc` ↔ `codex`). 플래그: `--dry-run`, `--yes`, `--force`, `--compile`, `--global` |
 | `handoff` | git 상태로 `CODEX-HANDOFF.md` 스캐폴드 생성 — 원시 채팅은 절대 안 씀 |
 | `backups` | 타임스탬프 백업 목록 |
@@ -227,6 +235,7 @@ Not portable:
 - [x] `audit` — 영역을 migrated / manual / not-portable로 분류 (0.5.0)
 - [x] `convert --compile` — CLAUDE.md 계층 평탄화 (0.6.0)
 - [x] `handoff` — git 기반 컨텍스트 스캐폴드 (0.7.0)
+- [x] `sync` — 안전한 양방향 프로젝트 설정 reconcile (0.8.0)
 - [ ] Gemini CLI · Cursor 어댑터
 - [ ] Codex TOML 작성 시 주석/미지 필드 보존
 - [ ] 명시적 위험 경고를 둔 opt-in `--include-env-values`

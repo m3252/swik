@@ -36,6 +36,13 @@ ai-switch status
 
 ## 常用流程
 
+安全同步两边工具：
+
+```sh
+swik sync --compile --dry-run
+swik sync --compile --yes
+```
+
 ### Claude Code 到 Codex
 
 先预览：
@@ -143,6 +150,7 @@ Not portable:
 | 机器可读检测 | `swik detect` |
 | 完整 Claude 领域审计 | `swik audit` |
 | 健康检查 | `swik doctor` |
+| 安全同步两边工具 | `swik sync --compile --dry-run` |
 | 预览 Claude Code -> Codex | `swik convert cc codex --compile --dry-run` |
 | 应用 Claude Code -> Codex | `swik convert cc codex --compile --yes` |
 | 预览 Codex -> Claude Code | `swik convert codex cc --dry-run` |
@@ -265,6 +273,7 @@ swik handoff --from codex --to cc
 - [x] `audit` — 把领域分类为 migrated / manual / not-portable（0.5.0）
 - [x] `convert --compile` — 展平 CLAUDE.md 层级（0.6.0）
 - [x] `handoff` — git 派生的上下文脚手架（0.7.0）
+- [x] `sync` — 安全的双向项目配置 reconcile（0.8.0）
 - [ ] Gemini CLI 与 Cursor 适配器
 - [ ] 写 Codex TOML 时保留注释/未知字段
 - [ ] 带显式危险警告的 opt-in `--include-env-values`

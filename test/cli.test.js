@@ -22,8 +22,10 @@ import {
   planLabel,
   planCcToCodex,
   planCodexToCc,
+  planSync,
   planCcToCodexGlobal,
   convertGlobal,
+  sync,
   restoreGlobalBackup,
   literalEnvNamesInConfigs,
   restoreBackup,
@@ -148,6 +150,53 @@ env = { "TOKEN" = "abc" }
   assert.equal(readFileSync(path.join(dir, "AGENTS.md"), "utf8"), "Prefer small patches.\n");
 });
 
+test("sync plans safe missing surfaces in both directions", () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "skills", "review"), { recursive: true });
+  mkdirSync(path.join(dir, ".agents", "skills", "fmt"), { recursive: true });
+  mkdirSync(path.join(dir, ".codex"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");
+  writeFileSync(path.join(dir, ".claude", "skills", "review", "SKILL.md"), "Review skill.\n");
+  writeFileSync(path.join(dir, ".agents", "skills", "fmt", "SKILL.md"), "Format skill.\n");
+  writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({
+    mcpServers: {
+      docs: { command: "node", args: ["docs.js"] }
+    }
+  }));
+  writeFileSync(path.join(dir, ".codex", "config.toml"), `
+[mcp_servers.remote]
+url = "https://example.com/sse"
+`);
+
+  const changes = planSync(dir, { compile: true });
+  const relatives = changes.filter((change) => change.path).map((change) => path.relative(dir, change.path));
+  assert.ok(relatives.includes("AGENTS.md"));
+  assert.ok(relatives.includes(".codex/config.toml"));
+  assert.ok(relatives.includes(".mcp.json"));
+  assert.ok(relatives.includes(".agents/skills/review"));
+  assert.ok(relatives.includes(".claude/skills/fmt"));
+  assert.ok(relatives.includes("ai-switch-report.md"));
+
+  const codexConfig = changes.find((change) => change.path?.endsWith(".codex/config.toml")).content;
+  assert.match(codexConfig, /\[mcp_servers\.remote\]/);
+  assert.match(codexConfig, /\[mcp_servers\."docs"\]/);
+
+  const mcpJson = JSON.parse(changes.find((change) => change.path?.endsWith(".mcp.json")).content);
+  assert.equal(mcpJson.mcpServers.remote.type, "http");
+  assert.equal(mcpJson.mcpServers.docs.command, "node");
+});
+
+test("sync reports instruction conflicts without overwriting either side", () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Claude instructions.\n");
+  writeFileSync(path.join(dir, "AGENTS.md"), "Codex instructions.\n");
+
+  const changes = planSync(dir);
+  assert.ok(changes.some((change) => change.kind === "manual-review" && change.label === "instructions"));
+  assert.equal(changes.some((change) => change.path === path.join(dir, "CLAUDE.md")), false);
+  assert.equal(changes.some((change) => change.path === path.join(dir, "AGENTS.md")), false);
+});
+
 test("parses multi-line Codex args and inline env with commas and equals", () => {
   const dir = fixture();
   mkdirSync(path.join(dir, ".codex"), { recursive: true });
@@ -239,6 +288,20 @@ test("writes migration with backup only when confirmed", async () => {
   const result = await convert("cc", "codex", { cwd: dir, yes: true });
   assert.ok(existsSync(path.join(dir, "AGENTS.md")));
   assert.ok(existsSync(path.join(dir, ".codex", "config.toml")));
+  assert.ok(existsSync(path.join(result.backupDir, "CLAUDE.md")));
+});
+
+test("sync writes safe missing targets with backup only when confirmed", async () => {
+  const dir = fixture();
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Use short responses.\n");
+
+  await assert.rejects(
+    () => sync(dir, { compile: true }),
+    /Refusing to write/
+  );
+
+  const result = await sync(dir, { compile: true, yes: true });
+  assert.ok(existsSync(path.join(dir, "AGENTS.md")));
   assert.ok(existsSync(path.join(result.backupDir, "CLAUDE.md")));
 });
 

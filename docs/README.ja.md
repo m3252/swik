@@ -36,6 +36,13 @@ ai-switch status
 
 ## よく使う流れ
 
+両方のツールを安全に同期:
+
+```sh
+swik sync --compile --dry-run
+swik sync --compile --yes
+```
+
 ### Claude Code から Codex
 
 まずプレビュー:
@@ -143,6 +150,7 @@ Not portable:
 | 検出結果を機械可読で出力 | `swik detect` |
 | Claude 領域を監査 | `swik audit` |
 | ヘルスチェック | `swik doctor` |
+| 両方のツールを安全に同期 | `swik sync --compile --dry-run` |
 | Claude Code -> Codex をプレビュー | `swik convert cc codex --compile --dry-run` |
 | Claude Code -> Codex を適用 | `swik convert cc codex --compile --yes` |
 | Codex -> Claude Code をプレビュー | `swik convert codex cc --dry-run` |
@@ -265,6 +273,7 @@ git から自動入力:
 - [x] `audit` — 領域を migrated / manual / not-portable に分類（0.5.0）
 - [x] `convert --compile` — CLAUDE.md 階層の平坦化（0.6.0）
 - [x] `handoff` — git 由来のコンテキスト雛形（0.7.0）
+- [x] `sync` — 安全な双方向プロジェクト設定 reconcile（0.8.0）
 - [ ] Gemini CLI と Cursor のアダプター
 - [ ] Codex TOML 書き込み時にコメント/未知フィールドを保持
 - [ ] 明示的な危険警告付きの opt-in `--include-env-values`

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -68,6 +68,7 @@ Usage:
   ${bin} status --global [--home <path>]
   ${bin} audit [--cwd <path>]
   ${bin} doctor [--cwd <path>]
+  ${bin} sync [--cwd <path>] [--compile] [--include-local] [--dry-run] [--yes] [--force]
   ${bin} handoff [--cwd <path>] [--output CODEX-HANDOFF.md] [--stdout] [--force] [--from <cc|codex>] [--to <cc|codex>]
   ${bin} backup [--cwd <path>]
   ${bin} backups [--cwd <path>] [--global [--home <path>]]
@@ -80,6 +81,8 @@ Usage:
 Examples:
   ${bin} status
   ${bin} audit
+  ${bin} sync --compile --dry-run
+  ${bin} sync --compile --yes
   ${bin} convert cc codex --compile --dry-run
   ${bin} convert cc codex --compile --yes
   ${bin} convert codex cc --dry-run
@@ -230,6 +233,32 @@ async function convert(fromRaw, toRaw, options) {
     else await writeFile(change.path, change.content, "utf8");
   }
   await refreshCreatedHashes(backupDir, (relative) => path.join(options.cwd, relative));
+  return { backupDir, changes };
+}
+
+async function sync(cwd, options = {}) {
+  const changes = planSync(cwd, options);
+
+  if (options.dryRun) {
+    printPlan(changes, cwd);
+    return { backupDir: null, changes };
+  }
+
+  assertProjectWriteScope(cwd);
+
+  if (!options.yes) {
+    throw new Error("Refusing to write without --yes. Run with --dry-run first, then add --yes.");
+  }
+
+  assertNoUnsafeSyncOverwrites(changes, cwd, options.force);
+
+  const backupDir = await makeBackup(cwd, changes);
+  for (const change of fileChanges(changes)) {
+    await mkdir(path.dirname(change.path), { recursive: true });
+    if (change.kind === "copy-dir") await copyTree(change.from, change.path);
+    else await writeFile(change.path, change.content, "utf8");
+  }
+  await refreshCreatedHashes(backupDir, (relative) => path.join(cwd, relative));
   return { backupDir, changes };
 }
 
@@ -454,6 +483,121 @@ function planCodexToCc(cwd) {
   return changes;
 }
 
+function planSync(cwd, options = {}) {
+  const files = projectPaths(cwd);
+  const changes = [];
+  const manualReviews = [];
+  const credentials = [];
+  let compiled;
+
+  const claudeMd = readText(files.claudeMd);
+  const agentsMd = readText(files.agentsMd);
+  if (claudeMd && !agentsMd) {
+    if (options.compile) {
+      compiled = compileInstructions(cwd, { includeLocal: options.includeLocal });
+      if (compiled.content) changes.push({ kind: "write", path: files.agentsMd, content: compiled.content });
+      manualReviews.push(...compiled.manualReviews);
+    } else {
+      changes.push({ kind: "write", path: files.agentsMd, content: migrateInstruction(claudeMd, "CLAUDE.md") });
+    }
+  } else if (agentsMd && !claudeMd) {
+    changes.push({ kind: "write", path: files.claudeMd, content: migrateInstruction(agentsMd, "AGENTS.md") });
+  } else if (claudeMd && agentsMd && claudeMd.trim() !== agentsMd.trim()) {
+    manualReviews.push("CLAUDE.md and AGENTS.md both exist and differ; sync will not overwrite either instruction file.");
+    changes.push({ kind: "manual-review", label: "instructions", reason: "CLAUDE.md and AGENTS.md differ." });
+  }
+
+  const claudeSourceAnalysis = analyzeClaudeMcpSources(cwd);
+  const claudeMcp = claudeSourceAnalysis.servers;
+  manualReviews.push(...claudeSourceAnalysis.manualReviews);
+  changes.push(...claudeSourceAnalysis.planItems);
+
+  const currentCodex = readText(files.codexConfig) ?? "";
+  const claudeToCodex = analyzeClaudeMcp(claudeMcp, codexMcpNames(currentCodex));
+  manualReviews.push(...claudeToCodex.manualReviews);
+  changes.push(...claudeToCodex.planItems);
+  if (Object.keys(claudeToCodex.supported).length > 0) {
+    credentials.push(...collectCredentials(claudeToCodex.supported));
+    const migratedBlock = `\n# Synced from Claude MCP settings by ai-switch.\n${toCodexToml(withReferencedEnv(claudeToCodex.supported))}`;
+    changes.push({ kind: "write", path: files.codexConfig, content: mergeCodexConfig(currentCodex, migratedBlock) });
+  }
+
+  const codexAnalysis = analyzeCodexMcp(cwd);
+  manualReviews.push(...codexAnalysis.manualReviews);
+  changes.push(...codexAnalysis.planItems);
+  credentials.push(...collectCredentials(codexAnalysis.servers));
+  const missingClaudeServers = missingClaudeMcpServers(claudeMcp, codexAnalysis.servers, manualReviews);
+  if (Object.keys(missingClaudeServers).length > 0) {
+    const mcpJson = readJson(files.mcpJson);
+    if (mcpJson?.__parseError) {
+      manualReviews.push(`.mcp.json could not be parsed (${mcpJson.__parseError}); Codex MCP servers were not synced to Claude.`);
+    } else {
+      const base = mcpJson && typeof mcpJson === "object" ? mcpJson : {};
+      const existing = base.mcpServers && typeof base.mcpServers === "object" ? base.mcpServers : {};
+      changes.push({
+        kind: "write",
+        path: files.mcpJson,
+        content: `${JSON.stringify({ ...base, mcpServers: { ...existing, ...toClaudeMcpServers(missingClaudeServers) } }, null, 2)}\n`
+      });
+    }
+  }
+
+  changes.push(...skillSyncChanges(files.claudeSkills, files.agentsSkills, manualReviews, ".claude/skills", ".agents/skills"));
+  changes.push(...skillSyncChanges(files.agentsSkills, files.claudeSkills, manualReviews, ".agents/skills", ".claude/skills"));
+
+  changes.push(reportChange(cwd, files.report, "sync", "sync", changes, manualReviews, credentials, reportAuditSurfaces(cwd, { ...options, compiled })));
+  return changes;
+}
+
+function missingClaudeMcpServers(existingClaude, codexServers, manualReviews) {
+  const missing = {};
+  for (const [name, server] of Object.entries(codexServers)) {
+    if (Object.hasOwn(existingClaude, name)) {
+      manualReviews.push(`MCP server "${name}" exists on both sides; sync did not overwrite either definition.`);
+      continue;
+    }
+    missing[name] = server;
+  }
+  return missing;
+}
+
+function skillSyncChanges(fromDir, toDir, manualReviews, fromLabel, toLabel) {
+  if (!existsSync(fromDir)) return [];
+  const changes = [];
+  for (const name of readdirSync(fromDir).sort()) {
+    const from = path.join(fromDir, name);
+    const to = path.join(toDir, name);
+    if (!existsSync(to)) {
+      changes.push({ kind: "copy-dir", from, path: to });
+      continue;
+    }
+    if (!samePathContent(from, to)) {
+      manualReviews.push(`${fromLabel}/${name} and ${toLabel}/${name} both exist and differ; sync did not overwrite either skill.`);
+      changes.push({ kind: "manual-review", label: `skills: ${name}`, reason: `${fromLabel}/${name} differs from ${toLabel}/${name}.` });
+    }
+  }
+  return changes;
+}
+
+function samePathContent(left, right) {
+  if (!existsSync(left) || !existsSync(right)) return false;
+  const leftStat = lstatSync(left);
+  const rightStat = lstatSync(right);
+  if (leftStat.isSymbolicLink() || rightStat.isSymbolicLink()) return leftStat.isSymbolicLink() && rightStat.isSymbolicLink();
+  if (leftStat.isFile() || rightStat.isFile()) {
+    return leftStat.isFile() && rightStat.isFile() && readFileSync(left).equals(readFileSync(right));
+  }
+  if (!leftStat.isDirectory() || !rightStat.isDirectory()) return false;
+  const leftNames = readdirSync(left).sort();
+  const rightNames = readdirSync(right).sort();
+  if (leftNames.length !== rightNames.length) return false;
+  for (let i = 0; i < leftNames.length; i += 1) {
+    if (leftNames[i] !== rightNames[i]) return false;
+    if (!samePathContent(path.join(left, leftNames[i]), path.join(right, rightNames[i]))) return false;
+  }
+  return true;
+}
+
 function migrateInstruction(content, sourceName) {
   let body = content.trim();
   while (MIGRATION_HEADER.test(body)) {
@@ -533,6 +677,16 @@ function isCompiledInstructionSurface(surface, compiledSources) {
 function assertNoUnsafeOverwrites(changes, cwd, force = false) {
   const unsafe = fileChanges(changes)
     .filter((change) => isUnsafeOverwrite(change, cwd))
+    .map((change) => path.relative(cwd, change.path));
+  if (unsafe.length > 0 && !force) {
+    throw new Error(`Refusing to overwrite existing files without --force: ${unsafe.join(", ")}`);
+  }
+}
+
+function assertNoUnsafeSyncOverwrites(changes, cwd, force = false) {
+  const mergeSafe = new Set([RELATIVE_PATHS.report, RELATIVE_PATHS.codexConfig, RELATIVE_PATHS.mcpJson, RELATIVE_PATHS.claudeSettings]);
+  const unsafe = fileChanges(changes)
+    .filter((change) => existsSync(change.path) && !mergeSafe.has(path.relative(cwd, change.path)))
     .map((change) => path.relative(cwd, change.path));
   if (unsafe.length > 0 && !force) {
     throw new Error(`Refusing to overwrite existing files without --force: ${unsafe.join(", ")}`);
@@ -794,6 +948,10 @@ async function main() {
   else if (command === "status") console.log(status(args.cwd, args));
   else if (command === "audit") console.log(formatAudit(args.cwd));
   else if (command === "doctor") doctor(args.cwd);
+  else if (command === "sync") {
+    const result = await sync(args.cwd, args);
+    console.log(args.dryRun ? "dry-run complete" : `synced with backup: ${result.backupDir}`);
+  }
   else if (command === "handoff") {
     const result = await handoff(args.cwd, args);
     if (args.stdout) console.log(result.content.trimEnd());
@@ -850,8 +1008,8 @@ function validateScopeOptions(command, args) {
   if (args.compile) {
     const [, from, to] = args._;
     const fromIsClaude = ["cc", "claude", "claude-code"].includes(from);
-    if (command !== "convert" || args.global || !fromIsClaude || to !== "codex") {
-      throw new Error("--compile is only supported for project `convert cc codex`.");
+    if (args.global || !((command === "convert" && fromIsClaude && to === "codex") || command === "sync")) {
+      throw new Error("--compile is only supported for project `convert cc codex` and `sync`.");
     }
   }
   const globalCommands = new Set(["status", "convert", "backups", "restore"]);
@@ -898,9 +1056,11 @@ export {
   planLabel,
   planCcToCodex,
   planCodexToCc,
+  planSync,
   planCcToCodexGlobal,
   planCodexToCcGlobal,
   convertGlobal,
+  sync,
   generateHandoff,
   handoff,
   literalEnvNamesInConfigs,
