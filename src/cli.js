@@ -567,9 +567,12 @@ function planSync(cwd, options = {}) {
 
   const claudeMd = readText(files.claudeMd);
   const agentsMd = readText(files.agentsMd);
+  if (options.compile && claudeMd) {
+    compiled = compileInstructions(cwd, { includeLocal: options.includeLocal });
+  }
+
   if (claudeMd && !agentsMd) {
     if (options.compile) {
-      compiled = compileInstructions(cwd, { includeLocal: options.includeLocal });
       if (compiled.content) changes.push({ kind: "write", path: files.agentsMd, content: compiled.content });
       manualReviews.push(...compiled.manualReviews);
     } else {
@@ -577,9 +580,13 @@ function planSync(cwd, options = {}) {
     }
   } else if (agentsMd && !claudeMd) {
     changes.push({ kind: "write", path: files.claudeMd, content: migrateInstruction(agentsMd, "AGENTS.md") });
-  } else if (claudeMd && agentsMd && !sameInstructionContent(claudeMd, agentsMd)) {
-    manualReviews.push("CLAUDE.md and AGENTS.md both exist and differ; sync will not overwrite either instruction file.");
-    changes.push({ kind: "manual-review", label: "instructions", reason: "CLAUDE.md and AGENTS.md differ." });
+  } else if (claudeMd && agentsMd) {
+    if (options.compile) manualReviews.push(...compiled.manualReviews);
+    const expectedInstruction = options.compile && compiled.content ? compiled.content : claudeMd;
+    if (!sameInstructionContent(expectedInstruction, agentsMd)) {
+      manualReviews.push("CLAUDE.md and AGENTS.md both exist and differ; sync will not overwrite either instruction file.");
+      changes.push({ kind: "manual-review", label: "instructions", reason: "CLAUDE.md and AGENTS.md differ." });
+    }
   }
 
   const claudeSourceAnalysis = analyzeClaudeMcpSources(cwd);
@@ -692,8 +699,10 @@ function normalizeInstructionForSync(content) {
   }
   if (COMPILED_HEADER.test(body)) {
     body = body.replace(COMPILED_HEADER, "").trim();
-    const singleSource = body.match(/^## From [^\n]+\n\n([\s\S]*)$/);
-    if (singleSource) body = singleSource[1].trim();
+    const sections = [...body.matchAll(/^## From [^\n]+\n\n([\s\S]*?)(?=\n\n## From [^\n]+\n\n|$)/gm)];
+    if (sections.length > 0) {
+      body = sections.map((section) => section[1].trim()).join("\n\n").trim();
+    }
   }
   return body;
 }

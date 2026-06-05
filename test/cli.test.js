@@ -208,6 +208,22 @@ test("sync is idempotent for instructions it generated", async () => {
   assert.equal(rerun.some((change) => change.path === path.join(dir, "AGENTS.md")), false);
 });
 
+test("sync --compile is idempotent for multi-source compiled instructions", async () => {
+  const dir = fixture();
+  mkdirSync(path.join(dir, ".claude", "rules"), { recursive: true });
+  writeFileSync(path.join(dir, "CLAUDE.md"), "Root rules.\n");
+  writeFileSync(path.join(dir, ".claude", "CLAUDE.md"), "Nested rules.\n");
+  writeFileSync(path.join(dir, ".claude", "rules", "style.md"), "Style rules.\n");
+
+  await sync(dir, { compile: true, yes: true });
+  const rerun = planSync(dir, { compile: true });
+  const report = rerun.find((change) => change.path?.endsWith("ai-switch-report.md")).content;
+
+  assert.equal(rerun.some((change) => change.kind === "manual-review" && change.label === "instructions"), false);
+  assert.equal(rerun.some((change) => change.path === path.join(dir, "AGENTS.md")), false);
+  assert.doesNotMatch(report, /Other Claude surfaces detected/);
+});
+
 test("parses multi-line Codex args and inline env with commas and equals", () => {
   const dir = fixture();
   mkdirSync(path.join(dir, ".codex"), { recursive: true });
